@@ -159,10 +159,9 @@ CREATE INDEX IF NOT EXISTS idx_radar_results_expires_at ON public.radar_results(
 -- Trigram index for fuzzy query matching (cache lookup)
 CREATE INDEX IF NOT EXISTS idx_radar_results_query_trgm
   ON public.radar_results USING gin(query gin_trgm_ops);
--- Composite index: look up active (non-expired) cache by user+query
+-- Composite index: look up cache by user+query, filter expired in app layer
 CREATE INDEX IF NOT EXISTS idx_radar_results_user_query_active
-  ON public.radar_results(user_id, query, expires_at)
-  WHERE expires_at > NOW();
+  ON public.radar_results(user_id, query, expires_at);
 
 -- =============================================================================
 -- ROW LEVEL SECURITY (RLS)
