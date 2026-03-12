@@ -154,10 +154,13 @@ def set_logged_in(user_id: str) -> None:
 
 
 def set_not_started(user_id: str) -> None:
-    """Reset a session to not_started (e.g. on modal open to clear stale state)."""
-    record = _load_session(user_id) or {}
-    record.update({"status": "not_started", "updated_at": _now_iso()})
-    _save_session(user_id, record)
+    """Reset a session to not_started by deleting the session file."""
+    path = _session_path(user_id)
+    try:
+        path.unlink(missing_ok=True)
+        logger.info("Session file cleared for user_id=%s", user_id)
+    except Exception as exc:
+        logger.warning("Could not delete session file for %s: %s", user_id, exc)
 
 
 def set_expired(user_id: str) -> None:

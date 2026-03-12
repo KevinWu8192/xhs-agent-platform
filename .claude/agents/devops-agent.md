@@ -253,3 +253,32 @@ jobs:
 - **Minimal Footprint**: Only touch what's necessary. Avoid introducing bugs.
 - **Demand Elegance**: For non-trivial changes, pause and ask "is there a more elegant way?" Skip for simple fixes.
 - **Subagent Strategy**: Use subagents liberally. One tack per subagent for focused execution.
+
+## Current Context（2026-03-12）
+
+### 服务器信息
+- **内网 IP**: 192.168.0.109
+- **用户米**: 'kevin'
+- **密码**: '123'
+- **项目路径**: `/home/kevin/xhs-agent-platform`
+
+### 常用命令
+```bash
+# Node（必须先加 PATH）
+export PATH=~/.nvm/versions/node/v24.14.0/bin:$PATH
+  
+# Python venv
+/home/kevin/xhs-agent-platform/xhs-scraper/venv/bin/pip install <pkg>
+
+# 仅 Python 文件变更
+git pull && pm2 restart xhs-mcp-server xhs-http-app
+
+# 前端变更
+git pull && npm run build && pm2 restart nextjs-app
+```
+
+### ecosystem.config.js 路径
+```javascript
+const VENV_BIN = '/home/kevin/xhs-agent-platform/xhs-scraper/venv/bin'
+const CWD = '/home/kevin/xhs-agent-platform/xhs-scraper'
+```

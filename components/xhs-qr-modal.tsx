@@ -70,6 +70,13 @@ export function XHSQRModal({ userId, isOpen, onClose, onLoginSuccess }: XHSQRMod
     setSecondsLeft(QR_TTL_SECONDS)
     clearAll()
 
+    // Reset server session state before requesting new QR
+    try {
+      await fetch(`/api/xhs/reset?user_id=${encodeURIComponent(userId)}`)
+    } catch {
+      // Non-fatal — continue even if reset fails
+    }
+
     try {
       const res = await fetch('/api/xhs/qr', {
         method: 'POST',
@@ -176,6 +183,10 @@ export function XHSQRModal({ userId, isOpen, onClose, onLoginSuccess }: XHSQRMod
       fetchQRCode()
     } else {
       clearAll()
+      // Reset server-side session on modal close
+      if (userId) {
+        fetch(`/api/xhs/reset?user_id=${encodeURIComponent(userId)}`).catch(() => {})
+      }
       // Reset state so next open starts fresh
       setStatus('loading')
       setQrImageBase64(null)

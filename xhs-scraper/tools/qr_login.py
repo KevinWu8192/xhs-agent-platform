@@ -25,6 +25,7 @@ import base64
 import json
 import logging
 import os
+import shutil as _shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -40,6 +41,24 @@ from session_manager import (
     set_not_started,
     set_pending,
 )
+
+
+def _find_chrome_bin() -> str | None:
+    """Find Chrome/Edge/Chromium binary (Edge fallback for Linux servers)."""
+    return (
+        _shutil.which("google-chrome")
+        or _shutil.which("chromium")
+        or _shutil.which("microsoft-edge")
+        or _shutil.which("microsoft-edge-stable")
+    )
+
+
+def _ensure_chrome_profile_dir() -> Path:
+    """Ensure ~/.xhs/chrome-profile directory exists and return it."""
+    profile_dir = Path.home() / ".xhs" / "chrome-profile"
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    return profile_dir
+
 
 logger = logging.getLogger("xhs.tools.qr_login")
 
