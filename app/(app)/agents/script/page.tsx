@@ -6,6 +6,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { useState, useCallback } from 'react'
+import Link from 'next/link'
 import type { ScriptStyle } from '@/types'
 
 // ── 内容风格选项 ──────────────────────────────────────────────
@@ -53,6 +54,7 @@ export default function ScriptPage() {
   const [scriptText, setScriptText] = useState('')
   const [isDone, setIsDone] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [isKeyError, setIsKeyError] = useState(false)
   const [charCount, setCharCount] = useState(0)
   const [copied, setCopied] = useState(false)
 
@@ -79,6 +81,7 @@ export default function ScriptPage() {
     setScriptText('')
     setIsDone(false)
     setError(null)
+    setIsKeyError(false)
 
     try {
       const response = await fetch('/api/agents/script', {
@@ -93,6 +96,15 @@ export default function ScriptPage() {
       })
 
       if (!response.ok) {
+        if (response.status === 422) {
+          const data = await response.json()
+          if (data.error === 'API_KEY_NOT_CONFIGURED') {
+            setError('请先前往「设置」页面配置你的 AI API Key')
+            setIsKeyError(true)
+            setIsGenerating(false)
+            return
+          }
+        }
         const errText = await response.text()
         setError(`请求失败 (${response.status}): ${errText}`)
         setIsGenerating(false)
@@ -297,12 +309,28 @@ export default function ScriptPage() {
 
           {/* 错误提示 */}
           {error && (
-            <div className="flex items-center gap-3 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700">
-              <span className="text-lg shrink-0">⚠️</span>
-              <p className="text-sm">{error}</p>
+            <div className={[
+              'flex items-center gap-3 p-4 rounded-xl border',
+              isKeyError
+                ? 'bg-amber-50 border-amber-200 text-amber-800'
+                : 'bg-red-50 border-red-200 text-red-700',
+            ].join(' ')}>
+              <span className="text-lg shrink-0">{isKeyError ? '🔑' : '⚠️'}</span>
+              <p className="text-sm flex-1">{error}</p>
+              {isKeyError && (
+                <Link
+                  href="/settings"
+                  className="shrink-0 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-600 transition-colors"
+                >
+                  前往设置
+                </Link>
+              )}
               <button
-                onClick={() => setError(null)}
-                className="ml-auto text-red-400 hover:text-red-600 transition-colors"
+                onClick={() => { setError(null); setIsKeyError(false) }}
+                className={[
+                  'shrink-0 transition-colors',
+                  isKeyError ? 'text-amber-400 hover:text-amber-600' : 'ml-auto text-red-400 hover:text-red-600',
+                ].join(' ')}
               >
                 ✕
               </button>

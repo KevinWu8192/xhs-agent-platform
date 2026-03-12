@@ -5,6 +5,7 @@
 
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
+import { SetupBanner } from '@/components/setup-banner'
 
 // ── Agent 卡片数据（硬编码）────────────────────────────────────
 const agents = [
@@ -92,6 +93,9 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-8 animate-fade-in">
+      {/* ── API Key 引导 Banner ────────────────────────────────── */}
+      <SetupBanner />
+
       {/* ── 欢迎语区域 ─────────────────────────────────────────── */}
       <section>
         <div

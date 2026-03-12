@@ -5,7 +5,7 @@
  * PUT  /api/settings — updates current user's AI settings
  *
  * GET Response:
- *   { baseUrl: string | null, model: string, hasCustomKey: boolean, keyPreview: string | null }
+ *   { baseUrl: string | null, model: string, hasCustomKey: boolean, keyPreview: string | null, systemHasDefault: boolean }
  *
  * PUT Body:
  *   { baseUrl?: string, model?: string, apiKey?: string }
@@ -77,6 +77,7 @@ export async function GET() {
       model: DEFAULT_MODEL,
       hasCustomKey: false,
       keyPreview: null,
+      systemHasDefault: !!(process.env.ANTHROPIC_API_KEY),
     })
   }
 
@@ -88,6 +89,7 @@ export async function GET() {
     model: profile.ai_model ?? DEFAULT_MODEL,
     hasCustomKey,
     keyPreview,
+    systemHasDefault: !!(process.env.ANTHROPIC_API_KEY),
   })
 }
 

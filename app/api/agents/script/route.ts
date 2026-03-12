@@ -15,7 +15,7 @@
 
 import { NextRequest } from 'next/server'
 import { createClient, getAuthenticatedUser } from '@/lib/supabase/server'
-import { createAnthropicClient, resolveModel } from '@/lib/claude'
+import { createAnthropicClient, resolveModel, MissingAPIKeyError } from '@/lib/claude'
 import type { AgentType, ScriptStyle, ScriptTone } from '@/types'
 
 // ---------------------------------------------------------------------------
@@ -138,7 +138,18 @@ export async function POST(req: NextRequest) {
     model: profile?.ai_model,
   }
 
-  const client = createAnthropicClient(userAISettings)
+  let client
+  try {
+    client = createAnthropicClient(userAISettings)
+  } catch (err) {
+    if (err instanceof MissingAPIKeyError) {
+      return Response.json(
+        { error: 'API_KEY_NOT_CONFIGURED', message: '请先在「设置」页面配置你的 AI API Key' },
+        { status: 422 }
+      )
+    }
+    throw err
+  }
   const model = resolveModel(userAISettings)
 
   let convId = conversation_id ?? null

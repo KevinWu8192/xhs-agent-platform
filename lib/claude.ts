@@ -8,18 +8,40 @@
 import Anthropic from '@anthropic-ai/sdk'
 
 // ---------------------------------------------------------------------------
-// Client singleton
+// Client singleton (lazy — only created when env var is available)
 // ---------------------------------------------------------------------------
-
-// Default client using env vars (fallback when user has no custom settings)
-export const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-  ...(process.env.ANTHROPIC_BASE_URL && { baseURL: process.env.ANTHROPIC_BASE_URL }),
-})
 
 // Default model — overridable via environment variable
 export const DEFAULT_MODEL =
   process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-6'
+
+/**
+ * Lazy singleton: returns a shared Anthropic client backed by env vars.
+ * Returns null if ANTHROPIC_API_KEY is not set.
+ * Use createAnthropicClient() in request handlers instead of this directly.
+ */
+let _defaultClient: Anthropic | null = null
+export function getDefaultClient(): Anthropic | null {
+  if (!process.env.ANTHROPIC_API_KEY) return null
+  if (!_defaultClient) {
+    _defaultClient = new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY,
+      ...(process.env.ANTHROPIC_BASE_URL && { baseURL: process.env.ANTHROPIC_BASE_URL }),
+    })
+  }
+  return _defaultClient
+}
+
+// ---------------------------------------------------------------------------
+// Missing API key error
+// ---------------------------------------------------------------------------
+
+export class MissingAPIKeyError extends Error {
+  constructor() {
+    super('NO_API_KEY_CONFIGURED')
+    this.name = 'MissingAPIKeyError'
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Per-user client factory (for custom API URL / key / model from settings)
@@ -34,10 +56,15 @@ export interface UserAISettings {
 /**
  * Returns an Anthropic client configured with the user's custom settings,
  * falling back to environment variables if not set.
+ * Throws MissingAPIKeyError if neither the user nor the environment provides a key.
  */
 export function createAnthropicClient(userSettings?: UserAISettings | null): Anthropic {
-  const apiKey = userSettings?.apiKey || process.env.ANTHROPIC_API_KEY || ''
+  const apiKey = userSettings?.apiKey || process.env.ANTHROPIC_API_KEY
   const baseURL = userSettings?.baseUrl || process.env.ANTHROPIC_BASE_URL
+
+  if (!apiKey) {
+    throw new MissingAPIKeyError()
+  }
 
   return new Anthropic({
     apiKey,

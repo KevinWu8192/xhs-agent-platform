@@ -6,6 +6,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import { useState, useCallback } from 'react'
+import Link from 'next/link'
 import type { XHSNote } from '@/types'
 
 const PLATFORMS = ['全部平台', '小红书', '微博', '抖音', 'B站'] as const
@@ -19,6 +20,7 @@ export default function RadarPage() {
   const [notes, setNotes] = useState<XHSNote[]>([])
   const [insights, setInsights] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [isKeyError, setIsKeyError] = useState(false)
   const [hasSearched, setHasSearched] = useState(false)
   const [activePlatform, setActivePlatform] = useState('全部平台')
 
@@ -29,6 +31,7 @@ export default function RadarPage() {
     setNotes([])
     setInsights('')
     setError(null)
+    setIsKeyError(false)
     setHasSearched(true)
 
     try {
@@ -39,6 +42,15 @@ export default function RadarPage() {
       })
 
       if (!response.ok) {
+        if (response.status === 422) {
+          const data = await response.json()
+          if (data.error === 'API_KEY_NOT_CONFIGURED') {
+            setError('请先前往「设置」页面配置你的 AI API Key')
+            setIsKeyError(true)
+            setIsLoading(false)
+            return
+          }
+        }
         const errText = await response.text()
         setError(`请求失败 (${response.status}): ${errText}`)
         setIsLoading(false)
@@ -230,12 +242,28 @@ export default function RadarPage() {
 
       {/* ── 错误提示 ────────────────────────────────────────────── */}
       {error && (
-        <div className="flex items-center gap-3 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700">
-          <span className="text-lg shrink-0">⚠️</span>
-          <p className="text-sm">{error}</p>
+        <div className={[
+          'flex items-center gap-3 p-4 rounded-xl border',
+          isKeyError
+            ? 'bg-amber-50 border-amber-200 text-amber-800'
+            : 'bg-red-50 border-red-200 text-red-700',
+        ].join(' ')}>
+          <span className="text-lg shrink-0">{isKeyError ? '🔑' : '⚠️'}</span>
+          <p className="text-sm flex-1">{error}</p>
+          {isKeyError && (
+            <Link
+              href="/settings"
+              className="shrink-0 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-600 transition-colors"
+            >
+              前往设置
+            </Link>
+          )}
           <button
-            onClick={() => setError(null)}
-            className="ml-auto text-red-400 hover:text-red-600 transition-colors"
+            onClick={() => { setError(null); setIsKeyError(false) }}
+            className={[
+              'shrink-0 transition-colors',
+              isKeyError ? 'text-amber-400 hover:text-amber-600' : 'text-red-400 hover:text-red-600',
+            ].join(' ')}
           >
             ✕
           </button>
