@@ -111,7 +111,8 @@ export default function SettingsPage() {
       model: modelToSave || undefined,
     }
 
-    if (isEditingKey && newApiKey) {
+    // Send apiKey when: editing an existing key OR entering a new key for the first time
+    if (newApiKey) {
       body.apiKey = newApiKey
     }
 

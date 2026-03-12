@@ -31,10 +31,25 @@ export default function RadarPage() {
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null)
 
   useEffect(() => {
-    fetch('/api/settings')
-      .then((r) => r.json())
-      .then((data) => setHasApiKey(!!(data.hasCustomKey || data.systemHasDefault)))
-      .catch(() => setHasApiKey(false))
+    const checkApiKey = () => {
+      fetch('/api/settings')
+        .then((r) => r.json())
+        .then((data) => setHasApiKey(!!(data.hasCustomKey || data.systemHasDefault)))
+        .catch(() => setHasApiKey(false))
+    }
+
+    checkApiKey() // initial check
+
+    // Re-check when user returns to this tab/page after visiting settings
+    const handleFocus = () => checkApiKey()
+    window.addEventListener('focus', handleFocus)
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) checkApiKey()
+    })
+
+    return () => {
+      window.removeEventListener('focus', handleFocus)
+    }
   }, [])
 
   // ── Supabase user ID ───────────────────────────────────────
