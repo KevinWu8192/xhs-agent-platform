@@ -49,8 +49,12 @@ def test_basic_api():
             max_tokens=80,
             messages=[{"role": "user", "content": "用中文回答：1+1等于几？"}]
         )
-        text = msg.content[0].text if msg.content else ""
+        # MiniMax-M2.5 是思维链模型，content 可能含 ThinkingBlock，需按 type 取 text
+        text = next((b.text for b in msg.content if b.type == "text"), "")
+        thinking = next((b.thinking for b in msg.content if b.type == "thinking"), None)
         ok(f"API 调用成功，stop_reason={msg.stop_reason}")
+        if thinking:
+            ok(f"思维过程（前50字）：{thinking[:50]}...")
         ok(f"模型回复：{text[:100]}")
         return True
     except Exception as e:
