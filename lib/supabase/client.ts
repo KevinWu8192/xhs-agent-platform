@@ -8,13 +8,13 @@
  */
 
 import { createBrowserClient } from '@supabase/ssr'
-import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Database } from './database.types'
 
 // Re-export a typed client for use across the app
-export type TypedSupabaseClient = SupabaseClient<Database>
+// Use ReturnType to stay in sync with the @supabase/ssr version
+export type TypedSupabaseClient = ReturnType<typeof createBrowserClient<Database>>
 
-let client: TypedSupabaseClient | null = null
+let client: TypedSupabaseClient | undefined
 
 /**
  * Returns a singleton browser-side Supabase client.

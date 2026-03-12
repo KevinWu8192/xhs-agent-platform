@@ -1,0 +1,25 @@
+import { redirect } from 'next/navigation'
+import { createClient } from '@/lib/supabase/server'
+import { MainLayout } from '@/components/layout/main-layout'
+import { Sidebar } from '@/components/layout/sidebar'
+
+export default async function AppLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  const supabase = createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    redirect('/login')
+  }
+
+  return (
+    <MainLayout sidebar={<Sidebar />}>
+      {children}
+    </MainLayout>
+  )
+}
