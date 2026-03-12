@@ -23,6 +23,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createClient, getAuthenticatedUser } from '@/lib/supabase/server'
 import { DEFAULT_MODEL } from '@/lib/claude'
 import type { XHSNote, AgentType, RadarSearchResult } from '@/types'
+import { fetchXHSNotes } from '@/lib/xhs-client'
 
 // ---------------------------------------------------------------------------
 // SSE helpers
@@ -234,9 +235,15 @@ export async function POST(req: NextRequest) {
     radarResultId = cachedResult.id
     isCached = true
   } else {
-    // Cache miss — use mock data (Phase 1) or live XHS data (Phase 2)
+    // Cache miss — try real XHS data (Phase 2), fall back to mock on failure
     const searchStart = Date.now()
-    notes = generateMockNotes(query, limit)
+    try {
+      const xhsResponse = await fetchXHSNotes(query, { limit })
+      notes = xhsResponse.notes
+    } catch (err) {
+      console.error('[Radar] XHS fetch failed, using mock:', err)
+      notes = generateMockNotes(query, limit)
+    }
 
     const searchResult: RadarSearchResult = {
       id: crypto.randomUUID(),

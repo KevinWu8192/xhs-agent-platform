@@ -2,37 +2,37 @@
 
 // ─────────────────────────────────────────────────────────────
 //  Script Agent Page — 脚本口播
-//  话题输入 + 风格选择 + 生成按钮 + 空状态输出区
-//  M4 将接入真实 AI API，当前展示完整 UI 交互
+//  话题输入 + 风格选择 + 生成按钮 + 流式脚本输出区
 // ─────────────────────────────────────────────────────────────
 
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
+import type { ScriptStyle } from '@/types'
 
 // ── 内容风格选项 ──────────────────────────────────────────────
 const STYLE_OPTIONS = [
   {
-    id: 'lifestyle',
+    id: 'lifestyle' as ScriptStyle,
     label: '生活类',
     emoji: '🌿',
     desc: '温暖真实，记录日常',
     gradient: 'from-emerald-400 to-teal-500',
   },
   {
-    id: 'beauty',
+    id: 'beauty' as ScriptStyle,
     label: '美妆',
     emoji: '💄',
     desc: '种草拔草，专业干货',
     gradient: 'from-rose-400 to-pink-500',
   },
   {
-    id: 'food',
+    id: 'food' as ScriptStyle,
     label: '美食',
     emoji: '🍜',
     desc: '探店食谱，烟火人间',
     gradient: 'from-amber-400 to-orange-500',
   },
   {
-    id: 'tech',
+    id: 'tech' as ScriptStyle,
     label: '数码',
     emoji: '📱',
     desc: '开箱测评，极客范儿',
@@ -40,16 +40,21 @@ const STYLE_OPTIONS = [
   },
 ] as const
 
-type StyleId = typeof STYLE_OPTIONS[number]['id']
-
 // ── 快速话题填入 ──────────────────────────────────────────────
 const HOT_TOPICS = ['秋冬穿搭', '在家咖啡', '日系妆容', '宿舍改造', '慢生活'] as const
+const EXAMPLE_TOPICS = ['秋冬日系清透妆容教程', '咖啡在家复刻 5 个诀窍', '宿舍改造前后对比'] as const
+
+type ScriptSSEEvent = 'start' | 'delta' | 'done' | 'error'
 
 export default function ScriptPage() {
   const [topic, setTopic] = useState('')
-  const [selectedStyle, setSelectedStyle] = useState<StyleId>('lifestyle')
+  const [style, setStyle] = useState<ScriptStyle>('lifestyle')
   const [isGenerating, setIsGenerating] = useState(false)
+  const [scriptText, setScriptText] = useState('')
+  const [isDone, setIsDone] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [charCount, setCharCount] = useState(0)
+  const [copied, setCopied] = useState(false)
 
   function handleTopicChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     const val = e.target.value
@@ -59,20 +64,106 @@ export default function ScriptPage() {
     }
   }
 
-  function handleGenerate() {
-    if (!topic.trim()) return
-    setIsGenerating(true)
-    // M4: 接入真实 AI 脚本生成 API
-    setTimeout(() => setIsGenerating(false), 3000)
-  }
-
   function fillTopic(t: string) {
-    if (topic.length + t.length <= 200) {
-      const newTopic = topic ? `${topic} ${t}` : t
+    const newTopic = topic ? `${topic} ${t}` : t
+    if (newTopic.length <= 200) {
       setTopic(newTopic)
       setCharCount(newTopic.length)
     }
   }
+
+  const handleGenerate = useCallback(async () => {
+    if (!topic.trim()) return
+
+    setIsGenerating(true)
+    setScriptText('')
+    setIsDone(false)
+    setError(null)
+
+    try {
+      const response = await fetch('/api/agents/script', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic: topic.trim(),
+          style,
+          duration_seconds: 60,
+          tone: 'casual',
+        }),
+      })
+
+      if (!response.ok) {
+        const errText = await response.text()
+        setError(`请求失败 (${response.status}): ${errText}`)
+        setIsGenerating(false)
+        return
+      }
+
+      const reader = response.body!.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed.startsWith('data: ')) continue
+
+          const raw = trimmed.slice(6)
+          if (raw === '[DONE]') {
+            setIsGenerating(false)
+            setIsDone(true)
+            return
+          }
+
+          try {
+            const parsed = JSON.parse(raw) as { event: ScriptSSEEvent; data: unknown }
+            if (parsed.event === 'delta') {
+              const delta = parsed.data as { type: string; text: string }
+              if (delta.text) {
+                setScriptText((prev) => prev + delta.text)
+              }
+            } else if (parsed.event === 'done') {
+              setIsGenerating(false)
+              setIsDone(true)
+              return
+            } else if (parsed.event === 'error') {
+              const errData = parsed.data as { message?: string }
+              setError(errData?.message ?? '生成出错')
+              setIsGenerating(false)
+              return
+            }
+          } catch {
+            // skip malformed lines
+          }
+        }
+      }
+
+      setIsGenerating(false)
+      setIsDone(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '网络请求失败')
+      setIsGenerating(false)
+    }
+  }, [topic, style])
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(scriptText)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // Clipboard API not available
+    }
+  }
+
+  const hasScript = scriptText.length > 0
 
   return (
     <div className="animate-fade-in">
@@ -166,21 +257,21 @@ export default function ScriptPage() {
             </label>
 
             <div className="grid grid-cols-2 gap-2.5">
-              {STYLE_OPTIONS.map((style) => (
+              {STYLE_OPTIONS.map((styleOption) => (
                 <button
-                  key={style.id}
-                  onClick={() => setSelectedStyle(style.id)}
+                  key={styleOption.id}
+                  onClick={() => setStyle(styleOption.id)}
                   className={[
                     'relative p-3.5 rounded-xl text-left',
                     'transition-all duration-150',
                     'border-2',
-                    selectedStyle === style.id
+                    style === styleOption.id
                       ? 'border-rose-400 bg-rose-50'
                       : 'border-transparent bg-neutral-50 hover:border-neutral-200',
                   ].join(' ')}
                 >
                   {/* 选中指示 */}
-                  {selectedStyle === style.id && (
+                  {style === styleOption.id && (
                     <div className="absolute top-2 right-2 w-4 h-4 rounded-full bg-rose-500 flex items-center justify-center">
                       <span className="text-white text-xs font-bold">✓</span>
                     </div>
@@ -190,19 +281,33 @@ export default function ScriptPage() {
                   <div
                     className={[
                       'w-9 h-9 rounded-xl mb-2',
-                      `bg-gradient-to-br ${style.gradient}`,
+                      `bg-gradient-to-br ${styleOption.gradient}`,
                       'flex items-center justify-center text-lg',
                     ].join(' ')}
                   >
-                    {style.emoji}
+                    {styleOption.emoji}
                   </div>
 
-                  <div className="text-sm font-semibold text-neutral-800">{style.label}</div>
-                  <div className="text-xs text-neutral-500 mt-0.5">{style.desc}</div>
+                  <div className="text-sm font-semibold text-neutral-800">{styleOption.label}</div>
+                  <div className="text-xs text-neutral-500 mt-0.5">{styleOption.desc}</div>
                 </button>
               ))}
             </div>
           </section>
+
+          {/* 错误提示 */}
+          {error && (
+            <div className="flex items-center gap-3 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700">
+              <span className="text-lg shrink-0">⚠️</span>
+              <p className="text-sm">{error}</p>
+              <button
+                onClick={() => setError(null)}
+                className="ml-auto text-red-400 hover:text-red-600 transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+          )}
 
           {/* 生成按钮 */}
           <button
@@ -244,8 +349,16 @@ export default function ScriptPage() {
             'min-h-[600px]',
           ].join(' ')}
         >
-          {isGenerating ? (
+          {!hasScript && isGenerating ? (
             <GeneratingState />
+          ) : hasScript ? (
+            <ScriptOutput
+              scriptText={scriptText}
+              isGenerating={isGenerating}
+              isDone={isDone}
+              copied={copied}
+              onCopy={handleCopy}
+            />
           ) : (
             <ScriptEmptyState onFillTopic={fillTopic} />
           )}
@@ -256,10 +369,79 @@ export default function ScriptPage() {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  ScriptEmptyState — 空状态（未生成脚本时）
+//  ScriptOutput — 流式脚本展示区
 // ─────────────────────────────────────────────────────────────
 
-const EXAMPLE_TOPICS = ['秋冬日系清透妆容教程', '咖啡在家复刻 5 个诀窍', '宿舍改造前后对比'] as const
+interface ScriptOutputProps {
+  scriptText: string
+  isGenerating: boolean
+  isDone: boolean
+  copied: boolean
+  onCopy: () => void
+}
+
+function ScriptOutput({ scriptText, isGenerating, isDone, copied, onCopy }: ScriptOutputProps) {
+  return (
+    <div className="flex flex-col h-full">
+      {/* 顶部工具栏 */}
+      <div className="flex items-center justify-between px-5 py-3 border-b border-neutral-100">
+        <div className="flex items-center gap-2 text-sm text-neutral-600">
+          <span>✍️</span>
+          <span className="font-medium">生成的脚本</span>
+          {isGenerating && (
+            <span className="flex items-center gap-1.5 text-xs text-rose-500 ml-2">
+              <span className="w-3 h-3 border-2 border-rose-400 border-t-transparent rounded-full animate-spin" />
+              生成中...
+            </span>
+          )}
+          {isDone && (
+            <span className="text-xs text-emerald-500 ml-2">✓ 生成完成</span>
+          )}
+        </div>
+
+        {/* 复制按钮 — 完成后显示 */}
+        {isDone && (
+          <button
+            onClick={onCopy}
+            className={[
+              'flex items-center gap-1.5 h-8 px-4 rounded-lg text-sm font-medium',
+              'transition-all duration-150',
+              copied
+                ? 'bg-emerald-50 text-emerald-600 border border-emerald-200'
+                : 'bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100',
+            ].join(' ')}
+          >
+            {copied ? (
+              <>
+                <span>✓</span>
+                <span>已复制</span>
+              </>
+            ) : (
+              <>
+                <span>📋</span>
+                <span>复制全文</span>
+              </>
+            )}
+          </button>
+        )}
+      </div>
+
+      {/* 脚本内容 */}
+      <div className="flex-1 overflow-y-auto p-5">
+        <pre className="whitespace-pre-wrap font-sans text-sm text-neutral-700 leading-relaxed">
+          {scriptText}
+          {isGenerating && (
+            <span className="inline-block w-0.5 h-4 bg-rose-400 animate-pulse ml-0.5 align-middle" />
+          )}
+        </pre>
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+//  ScriptEmptyState — 空状态（未生成脚本时）
+// ─────────────────────────────────────────────────────────────
 
 function ScriptEmptyState({ onFillTopic }: { onFillTopic: (t: string) => void }) {
   return (
@@ -307,7 +489,7 @@ function ScriptEmptyState({ onFillTopic }: { onFillTopic: (t: string) => void })
 }
 
 // ─────────────────────────────────────────────────────────────
-//  GeneratingState — 生成中的加载状态
+//  GeneratingState — 生成中的加载状态（脚本尚未开始流出时）
 // ─────────────────────────────────────────────────────────────
 
 function GeneratingState() {
