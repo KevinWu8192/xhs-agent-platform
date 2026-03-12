@@ -8,6 +8,8 @@
 
 import { useState, useCallback, useEffect } from 'react'
 import Link from 'next/link'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { XHSNote } from '@/types'
 import { createClient } from '@/lib/supabase/client'
 import { useXHSSession } from '@/hooks/use-xhs-session'
@@ -492,13 +494,20 @@ export default function RadarPage() {
                   <p className="text-xs text-neutral-400 mt-1">正在处理搜索结果，请稍候</p>
                 </div>
               ) : insights ? (
-                <div className="prose prose-sm max-w-none">
-                  <div className="whitespace-pre-wrap text-neutral-700 text-sm leading-relaxed font-sans">
+                <div className={[
+                  'prose prose-sm max-w-none',
+                  '[&_h2]:text-base [&_h2]:font-semibold [&_h2]:text-neutral-800 [&_h2]:mt-4 [&_h2]:mb-2',
+                  '[&_h3]:text-sm [&_h3]:font-semibold [&_h3]:text-neutral-700 [&_h3]:mt-3 [&_h3]:mb-1',
+                  '[&_ul]:my-1 [&_li]:text-sm [&_li]:text-neutral-700 [&_li]:my-0.5',
+                  '[&_p]:text-sm [&_p]:text-neutral-700 [&_p]:my-1',
+                  '[&_strong]:text-neutral-800',
+                ].join(' ')}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {insights}
-                    {isLoading && (
-                      <span className="inline-block w-0.5 h-4 bg-rose-400 animate-pulse ml-0.5 align-middle" />
-                    )}
-                  </div>
+                  </ReactMarkdown>
+                  {isLoading && (
+                    <span className="inline-block w-0.5 h-4 bg-rose-400 animate-pulse ml-0.5 align-middle" />
+                  )}
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-center">

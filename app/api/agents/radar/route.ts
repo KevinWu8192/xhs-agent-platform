@@ -391,7 +391,8 @@ export async function POST(req: NextRequest) {
 ## ⏰ 最佳发布时机
 - 推荐的发布时间和频率（基于发布时间数据）
 
-## 重要约束
+---
+**输出约束（不要将此节作为输出章节）**：
 - 分析报告必须引用具体笔记内容（例如"某篇点赞最高的笔记写道…"）
 - 每个维度用 ## 标题，内容用 - 列表，不要长段落
 - 总字数控制在 800-1200 字
@@ -418,6 +419,7 @@ export async function POST(req: NextRequest) {
             messages: [{ role: 'user', content: userPrompt }],
             tools,
             maxSteps: 10,
+            maxTokens: 4000,
           })
 
           let fullAnalysis = ''
@@ -713,7 +715,7 @@ ${noteSummary}
         const result = streamText({
           model: anthropicProvider(model),
           messages: [{ role: 'user', content: analysisPrompt }],
-          maxTokens: 2000,
+          maxTokens: 3500,
         })
 
         let fullAnalysis = ''
