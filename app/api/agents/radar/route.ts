@@ -5,25 +5,37 @@
  *
  * 信息雷达 Agent — searches XHS notes and streams AI trend analysis.
  *
- * Phase 1 (current): returns mock XHS notes + real Claude analysis via SSE.
- * Phase 2 (XHS Agent): replace MOCK_NOTES with actual data from the XHS
- *   scraping service. See the "XHS Agent Integration" section at the bottom
- *   of this file for the expected interface contract.
+ * Architecture:
+ *   1. Auth + input validation
+ *   2. Supabase: load user AI settings, find/create conversation
+ *   3. Check radar_results cache (24-hour TTL per user+query)
+ *   4. Cache miss → create MCP client connecting to http://localhost:8000/sse
+ *      Claude autonomously calls search_feeds (and optionally get_feed_detail)
+ *      via streamText() with maxSteps=5
+ *   5. Capture notes from tool call results, emit as SSE "notes" event
+ *   6. Stream Claude's analysis text as "delta" events
+ *   7. Persist results + emit "done"
+ *
+ * Fallback chain (if MCP SSE is unavailable):
+ *   MCP SSE (port 8000) → legacy HTTP searchXHS (port 8001) → xhs-client CLI → mock data
  *
  * SSE event sequence:
  *   {"event":"start",  "data":{"conversation_id":"uuid","message_id":"uuid"}}
- *   {"event":"notes",  "data":XHSNote[]}           ← full notes array
+ *   {"event":"notes",  "data":XHSNote[]}
  *   {"event":"delta",  "data":{"type":"delta","text":"...","index":0}}
  *   {"event":"done",   "data":{"type":"done",...}}
- *   {"event":"error",  "data":{"type":"error",...}} ← replaces done on failure
+ *   {"event":"error",  "data":{"type":"error",...}}
+ *   {"event":"xhs_login_required", "data":{"message":"..."}}
  */
 
 import { NextRequest } from 'next/server'
+import { createAnthropic } from '@ai-sdk/anthropic'
+import { streamText } from 'ai'
 import { createClient, getAuthenticatedUser } from '@/lib/supabase/server'
-import { createAnthropicClient, resolveModel, MissingAPIKeyError } from '@/lib/claude'
+import { resolveModel } from '@/lib/claude'
 import type { XHSNote, AgentType, RadarSearchResult } from '@/types'
 import { fetchXHSNotes } from '@/lib/xhs-client'
-import { searchXHS } from '@/lib/xhs-mcp-client'
+import { createXHSMCPClient, searchXHS } from '@/lib/xhs-mcp-client'
 
 // ---------------------------------------------------------------------------
 // SSE helpers
@@ -35,9 +47,7 @@ function sseFrame(event: string, data: unknown): Uint8Array {
 }
 
 // ---------------------------------------------------------------------------
-// Mock XHS data (Phase 1)
-// Replace this function in Phase 2 with a call to the XHS Agent service.
-// See XHS Agent Integration contract at the bottom of this file.
+// Mock XHS data (last-resort fallback)
 // ---------------------------------------------------------------------------
 function generateMockNotes(query: string, limit: number): XHSNote[] {
   const now = new Date().toISOString()
@@ -173,19 +183,22 @@ export async function POST(req: NextRequest) {
     model: profile?.ai_model,
   }
 
-  let client
-  try {
-    client = createAnthropicClient(userAISettings)
-  } catch (err) {
-    if (err instanceof MissingAPIKeyError) {
-      return Response.json(
-        { error: 'API_KEY_NOT_CONFIGURED', message: '请先在「设置」页面配置你的 AI API Key' },
-        { status: 422 }
-      )
-    }
-    throw err
+  // Validate that we have an API key before proceeding
+  const apiKey = userAISettings.apiKey || process.env.ANTHROPIC_API_KEY
+  if (!apiKey) {
+    return Response.json(
+      { error: 'API_KEY_NOT_CONFIGURED', message: '请先在「设置」页面配置你的 AI API Key' },
+      { status: 422 }
+    )
   }
+
   const model = resolveModel(userAISettings)
+
+  // Build the @ai-sdk/anthropic provider with user settings
+  const anthropicProvider = createAnthropic({
+    apiKey,
+    ...(userAISettings.baseUrl ? { baseURL: userAISettings.baseUrl } : {}),
+  })
 
   let convId = conversation_id ?? null
 
@@ -252,104 +265,319 @@ export async function POST(req: NextRequest) {
     .limit(1)
     .single()
 
-  let notes: XHSNote[] = []
-  let radarResultId: string
-  let isCached = false
+  // ---------------------------------------------------------------------------
+  // 5. Build the SSE stream
+  // ---------------------------------------------------------------------------
+  const readable = new ReadableStream({
+    async start(controller) {
+      // Emit start event immediately
+      controller.enqueue(
+        sseFrame('start', {
+          conversation_id: convId,
+          message_id: messageId,
+        })
+      )
 
-  if (cachedResult) {
-    // Cache hit
-    notes = cachedResult.results.notes
-    radarResultId = cachedResult.id
-    isCached = true
-  } else {
-    // Cache miss — try MCP server, fall back to legacy CLI mock on failure
-    const searchStart = Date.now()
-    try {
-      const xhsResponse = await searchXHS(user.id, query, {
-        limit,
-        sort_by: '最多点赞',
-      })
-      notes = xhsResponse.notes
-    } catch (err) {
-      const errMessage = err instanceof Error ? err.message : String(err)
+      let notes: XHSNote[] = []
+      let radarResultId: string
+      let isCached = false
+      let usedMCP = false
 
-      // User is not logged in to XHS — emit a login-required event and close
-      // the stream immediately so the client can redirect to the QR flow.
-      if (errMessage.includes('not_logged_in')) {
-        const loginRequiredStream = new ReadableStream({
-          start(controller) {
-            controller.enqueue(
-              sseFrame('xhs_login_required', {
-                message: '请先登录小红书',
+      // -----------------------------------------------------------------------
+      // 5a. Cache hit path
+      // -----------------------------------------------------------------------
+      if (cachedResult) {
+        notes = cachedResult.results.notes
+        radarResultId = cachedResult.id
+        isCached = true
+
+        // Emit cached notes immediately
+        controller.enqueue(sseFrame('notes', notes))
+      } else {
+        // -----------------------------------------------------------------------
+        // 5b. Cache miss — try MCP agentic path first
+        // -----------------------------------------------------------------------
+        const searchStart = Date.now()
+
+        // Attempt 1: MCP SSE client (Claude calls search_feeds autonomously)
+        let mcpClient: Awaited<ReturnType<typeof createXHSMCPClient>>['client'] | null = null
+
+        try {
+          const { client, tools } = await createXHSMCPClient()
+          mcpClient = client
+          usedMCP = true
+
+          // System prompt tells Claude its identity and that it should always
+          // pass the authenticated user's ID when calling MCP tools.
+          const systemPrompt = `你是一位专业的小红书趋势分析助手，拥有小红书平台工具访问权限。
+
+当前认证用户ID为: ${user.id}
+调用任何工具时，必须将此 user_id 作为参数传入。
+
+你的任务是：
+1. 使用 search_feeds 工具搜索关键词「${query}」的内容（limit: ${limit}，sort_by: 最多点赞）
+2. 分析搜索结果，提供深度趋势洞察
+3. 如有需要，可进一步调用 get_feed_detail 获取具体笔记详情
+
+请用中文回复分析结果。`
+
+          const userPrompt = `请搜索小红书上关于「${query}」的热门内容，并进行以下维度的深度分析：
+
+1. **内容趋势** — 当前热门内容方向和话题
+2. **用户痛点** — 目标受众最关心的问题
+3. **爆款规律** — 高互动笔记的共同特征
+4. **差异化机会** — 未被充分覆盖的选题角度
+5. **创作建议** — 3-5条具体的内容创作建议
+6. **最佳发布时机** — 推荐的发布时间和频率${filters ? `\n\n筛选条件: ${JSON.stringify(filters)}` : ''}`
+
+          // Stream Claude's agentic execution
+          const result = streamText({
+            model: anthropicProvider(model),
+            system: systemPrompt,
+            messages: [{ role: 'user', content: userPrompt }],
+            tools,
+            maxSteps: 5,
+          })
+
+          let fullAnalysis = ''
+          let index = 0
+          let notesEmitted = false
+
+          // Process the stream
+          for await (const part of result.fullStream) {
+            switch (part.type) {
+              case 'tool-result': {
+                // When Claude calls search_feeds, capture the returned notes
+                // and emit them as the "notes" SSE event
+                if (
+                  (part.toolName === 'search_feeds' || part.toolName === 'search_xhs') &&
+                  !notesEmitted
+                ) {
+                  try {
+                    // The MCP tool result can be an array of notes or a
+                    // {notes: [...]} object — handle both shapes
+                    const toolResult = part.result as unknown
+                    let extractedNotes: XHSNote[] = []
+
+                    if (Array.isArray(toolResult)) {
+                      extractedNotes = toolResult as XHSNote[]
+                    } else if (
+                      toolResult &&
+                      typeof toolResult === 'object' &&
+                      Array.isArray((toolResult as { notes?: XHSNote[] }).notes)
+                    ) {
+                      extractedNotes = (toolResult as { notes: XHSNote[] }).notes
+                    }
+
+                    if (extractedNotes.length > 0) {
+                      notes = extractedNotes
+                      notesEmitted = true
+                      controller.enqueue(sseFrame('notes', notes))
+                    }
+                  } catch (parseErr) {
+                    console.warn('[Radar] Failed to parse search_feeds result:', parseErr)
+                  }
+                }
+                break
+              }
+
+              case 'text-delta': {
+                fullAnalysis += part.textDelta
+                controller.enqueue(
+                  sseFrame('delta', { type: 'delta', text: part.textDelta, index })
+                )
+                index++
+                break
+              }
+
+              case 'error': {
+                throw part.error
+              }
+
+              default:
+                // tool-call, finish, etc. — no action needed
+                break
+            }
+          }
+
+          // If search_feeds was never called or returned empty (e.g. Claude
+          // skipped the tool call), fall back to HTTP search
+          if (!notesEmitted) {
+            console.warn('[Radar] MCP stream completed but search_feeds was not called or returned empty; falling back to HTTP search')
+            const fallback = await searchXHS(user.id, query, { limit, sort_by: '最多点赞' })
+            notes = fallback.notes
+            controller.enqueue(sseFrame('notes', notes))
+          }
+
+          // Retrieve final usage from the stream
+          const usage = await result.usage
+
+          // Persist completed assistant message
+          if (assistantMsg?.id) {
+            await supabase
+              .from('messages')
+              .update({
+                content: fullAnalysis,
+                metadata: {
+                  agent_type: 'radar' as AgentType,
+                  model,
+                  tokens_used: (usage.promptTokens ?? 0) + (usage.completionTokens ?? 0),
+                  search_query: query,
+                },
               })
+              .eq('id', assistantMsg.id)
+          }
+
+          // Save to radar_results cache
+          const searchResult: RadarSearchResult = {
+            id: crypto.randomUUID(),
+            query,
+            notes,
+            trending_tags: [query, '热门', '种草', '推荐'],
+            total_found: notes.length,
+            search_time_ms: Date.now() - searchStart,
+            cached: false,
+            expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+          }
+
+          const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+          const { data: savedResult } = await supabase
+            .from('radar_results')
+            .insert({
+              user_id: user.id,
+              query,
+              results: searchResult,
+              expires_at: expiresAt,
+            })
+            .select()
+            .single()
+
+          radarResultId = savedResult?.id ?? searchResult.id
+
+          await supabase
+            .from('conversations')
+            .update({ updated_at: new Date().toISOString() })
+            .eq('id', convId)
+
+          controller.enqueue(
+            sseFrame('done', {
+              type: 'done',
+              message_id: messageId,
+              conversation_id: convId,
+              usage: {
+                input_tokens: usage.promptTokens ?? 0,
+                output_tokens: usage.completionTokens ?? 0,
+              },
+            })
+          )
+          controller.close()
+          return
+        } catch (mcpErr) {
+          const mcpErrMessage = mcpErr instanceof Error ? mcpErr.message : String(mcpErr)
+
+          // Check for login-required error from MCP server
+          if (mcpErrMessage.includes('not_logged_in')) {
+            controller.enqueue(
+              sseFrame('xhs_login_required', { message: '请先登录小红书' })
             )
             controller.close()
-          },
-        })
-        return new Response(loginRequiredStream, {
-          headers: {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            Connection: 'keep-alive',
-          },
-        })
+            return
+          }
+
+          if (usedMCP) {
+            console.error('[Radar] MCP streamText failed, falling back to HTTP search:', mcpErrMessage)
+          } else {
+            console.error('[Radar] MCP client connection failed, falling back to HTTP search:', mcpErrMessage)
+          }
+        } finally {
+          // Always close the MCP client connection
+          if (mcpClient) {
+            try {
+              await mcpClient.close()
+            } catch {
+              // Ignore close errors
+            }
+          }
+        }
+
+        // Attempt 2: Legacy HTTP searchXHS (port 8001)
+        try {
+          const xhsResponse = await searchXHS(user.id, query, {
+            limit,
+            sort_by: '最多点赞',
+          })
+          notes = xhsResponse.notes
+        } catch (httpErr) {
+          const httpErrMessage = httpErr instanceof Error ? httpErr.message : String(httpErr)
+
+          if (httpErrMessage.includes('not_logged_in')) {
+            controller.enqueue(
+              sseFrame('xhs_login_required', { message: '请先登录小红书' })
+            )
+            controller.close()
+            return
+          }
+
+          // Attempt 3: Legacy CLI client
+          console.error('[Radar] HTTP searchXHS failed, falling back to xhs-client:', httpErrMessage)
+          try {
+            const fallbackResponse = await fetchXHSNotes(query, { limit })
+            notes = fallbackResponse.notes
+          } catch (cliErr) {
+            // Attempt 4: Inline mock data
+            console.error('[Radar] xhs-client fallback also failed, using inline mock:', cliErr)
+            notes = generateMockNotes(query, limit)
+          }
+        }
+
+        // Emit notes from the fallback path
+        controller.enqueue(sseFrame('notes', notes))
+
+        // Save fallback results to cache
+        const searchResult: RadarSearchResult = {
+          id: crypto.randomUUID(),
+          query,
+          notes,
+          trending_tags: [query, '热门', '种草', '推荐'],
+          total_found: notes.length,
+          search_time_ms: Date.now() - searchStart,
+          cached: false,
+          expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        }
+
+        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+        const { data: savedResult } = await supabase
+          .from('radar_results')
+          .insert({
+            user_id: user.id,
+            query,
+            results: searchResult,
+            expires_at: expiresAt,
+          })
+          .select()
+          .single()
+
+        radarResultId = savedResult?.id ?? searchResult.id
       }
 
-      // MCP server is unreachable or returned another error — graceful
-      // degradation: fall back to the legacy CLI client (which itself falls
-      // back to mock data if Chrome / the CLI is unavailable).
-      console.error('[Radar] MCP searchXHS failed, falling back to xhs-client:', errMessage)
+      // -----------------------------------------------------------------------
+      // 6. Non-MCP analysis path: build prompt and stream with @ai-sdk/anthropic
+      //    (used for cache hits and all fallback paths)
+      // -----------------------------------------------------------------------
       try {
-        const fallbackResponse = await fetchXHSNotes(query, { limit })
-        notes = fallbackResponse.notes
-      } catch (fallbackErr) {
-        console.error('[Radar] xhs-client fallback also failed, using inline mock:', fallbackErr)
-        notes = generateMockNotes(query, limit)
-      }
-    }
+        const noteSummary = notes
+          .slice(0, 10)
+          .map(
+            (n, i) =>
+              `${i + 1}. 《${n.title}》 - 作者: ${n.author}, 点赞: ${n.likes}, 评论: ${n.comments}, 标签: ${n.tags.join(' ')}`
+          )
+          .join('\n')
 
-    const searchResult: RadarSearchResult = {
-      id: crypto.randomUUID(),
-      query,
-      notes,
-      trending_tags: [query, '热门', '种草', '推荐'],
-      total_found: notes.length,
-      search_time_ms: Date.now() - searchStart,
-      cached: false,
-      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-    }
+        const filterContext = filters ? `筛选条件: ${JSON.stringify(filters)}\n` : ''
 
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-    const { data: savedResult } = await supabase
-      .from('radar_results')
-      .insert({
-        user_id: user.id,
-        query,
-        results: searchResult,
-        expires_at: expiresAt,
-      })
-      .select()
-      .single()
-
-    radarResultId = savedResult?.id ?? searchResult.id
-  }
-
-  // 5. Build Claude analysis prompt
-  const noteSummary = notes
-    .slice(0, 10)
-    .map(
-      (n, i) =>
-        `${i + 1}. 《${n.title}》 - 作者: ${n.author}, 点赞: ${n.likes}, 评论: ${n.comments}, 标签: ${n.tags.join(' ')}`
-    )
-    .join('\n')
-
-  const filterContext = filters
-    ? `筛选条件: ${JSON.stringify(filters)}\n`
-    : ''
-
-  const analysisPrompt = `你是一位专业的小红书数据分析师。请分析以下关于「${query}」的搜索结果，提供深度洞察。
+        const analysisPrompt = `你是一位专业的小红书数据分析师。请分析以下关于「${query}」的搜索结果，提供深度洞察。
 ${filterContext}
-搜索结果（共 ${notes.length} 条笔记，${isCached ? '来自缓存' : 'mock数据'}）：
+搜索结果（共 ${notes.length} 条笔记，${isCached ? '来自缓存' : '实时数据'}）：
 ${noteSummary}
 
 请从以下维度分析：
@@ -360,47 +588,28 @@ ${noteSummary}
 5. **创作建议** — 3-5条具体的内容创作建议
 6. **最佳发布时机** — 推荐的发布时间和频率`
 
-  // 6. Stream Claude analysis
-  const readable = new ReadableStream({
-    async start(controller) {
-      try {
-        // Emit start event
-        controller.enqueue(
-          sseFrame('start', {
-            conversation_id: convId,
-            message_id: messageId,
-          })
-        )
-
-        // Emit notes list
-        controller.enqueue(sseFrame('notes', notes))
-
-        // Stream Claude analysis
-        const stream = await client.messages.stream({
-          model,
-          max_tokens: 1500,
+        const result = streamText({
+          model: anthropicProvider(model),
           messages: [{ role: 'user', content: analysisPrompt }],
+          maxTokens: 1500,
         })
 
         let fullAnalysis = ''
         let index = 0
 
-        for await (const chunk of stream) {
-          if (
-            chunk.type === 'content_block_delta' &&
-            chunk.delta.type === 'text_delta'
-          ) {
-            const text = chunk.delta.text
-            fullAnalysis += text
+        for await (const part of result.fullStream) {
+          if (part.type === 'text-delta') {
+            fullAnalysis += part.textDelta
             controller.enqueue(
-              sseFrame('delta', { type: 'delta', text, index })
+              sseFrame('delta', { type: 'delta', text: part.textDelta, index })
             )
             index++
+          } else if (part.type === 'error') {
+            throw part.error
           }
         }
 
-        const finalMessage = await stream.finalMessage()
-        const usage = finalMessage.usage
+        const usage = await result.usage
 
         // Persist completed assistant message
         if (assistantMsg?.id) {
@@ -411,15 +620,14 @@ ${noteSummary}
               metadata: {
                 agent_type: 'radar' as AgentType,
                 model,
-                tokens_used: usage.input_tokens + usage.output_tokens,
-                radar_result_id: radarResultId,
+                tokens_used: (usage.promptTokens ?? 0) + (usage.completionTokens ?? 0),
+                radar_result_id: radarResultId!,
                 search_query: query,
               },
             })
             .eq('id', assistantMsg.id)
         }
 
-        // Update conversation timestamp
         await supabase
           .from('conversations')
           .update({ updated_at: new Date().toISOString() })
@@ -431,14 +639,13 @@ ${noteSummary}
             message_id: messageId,
             conversation_id: convId,
             usage: {
-              input_tokens: usage.input_tokens,
-              output_tokens: usage.output_tokens,
+              input_tokens: usage.promptTokens ?? 0,
+              output_tokens: usage.completionTokens ?? 0,
             },
           })
         )
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : 'Claude API error'
+      } catch (analysisErr) {
+        const message = analysisErr instanceof Error ? analysisErr.message : 'Claude API error'
         controller.enqueue(
           sseFrame('error', {
             type: 'error',
@@ -460,51 +667,3 @@ ${noteSummary}
     },
   })
 }
-
-// =============================================================================
-// XHS Agent Integration Contract (Phase 2)
-// =============================================================================
-//
-// When the XHS Agent is ready to provide real data, replace the call to
-// `generateMockNotes(query, limit)` above with a call to the XHS service.
-//
-// Expected integration point (around line 160):
-//
-//   // Replace this:
-//   notes = generateMockNotes(query, limit)
-//
-//   // With this (example):
-//   const xhsResponse = await fetchXHSNotes(query, { limit, filters })
-//   notes = xhsResponse.notes
-//
-// The XHS Agent must return data matching the `XHSNote` interface from
-// `types/index.ts`:
-//
-//   interface XHSNote {
-//     id: string                // Unique note ID from XHS
-//     title: string             // Note title
-//     author: string            // Display name
-//     author_id: string         // XHS author UID
-//     content_preview: string   // First ~200 chars of note body
-//     likes: number             // Like count
-//     comments: number          // Comment count
-//     shares: number            // Share/collect count
-//     tags: string[]            // Array of hashtag strings (without #)
-//     cover_image_url: string | null  // Cover image URL or null
-//     note_url: string          // Full URL to the note on XHS
-//     published_at: string      // ISO 8601 timestamp
-//     collected_at: string      // When this data was scraped (ISO 8601)
-//   }
-//
-// Recommended service interface:
-//
-//   // lib/xhs-client.ts (to be created by XHS Agent)
-//   export async function fetchXHSNotes(
-//     query: string,
-//     options: { limit: number; filters?: RadarFilters }
-//   ): Promise<{ notes: XHSNote[]; total: number; search_time_ms: number }>
-//
-// The radar_results caching layer (Supabase table) is already implemented
-// in this route — the XHS Agent does NOT need to handle caching.
-// Cache TTL: 24 hours per (user_id, query) pair.
-// =============================================================================

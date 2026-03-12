@@ -3,3 +3,4 @@ uvicorn[standard]>=0.24.0
 pydantic>=2.0.0
 python-multipart
 aiofiles
+fastmcp>=0.4.0
