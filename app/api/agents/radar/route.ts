@@ -35,7 +35,7 @@ import { createClient, getAuthenticatedUser } from '@/lib/supabase/server'
 import { resolveModel } from '@/lib/claude'
 import type { XHSNote, AgentType, RadarSearchResult } from '@/types'
 import { fetchXHSNotes } from '@/lib/xhs-client'
-import { createXHSMCPClient, searchXHS, checkLoginStatus } from '@/lib/xhs-mcp-client'
+import { createXHSMCPClient, searchXHS } from '@/lib/xhs-mcp-client'
 
 // ---------------------------------------------------------------------------
 // Structured logger — PM2 captures stdout, grep with [RADAR:xxx]
@@ -214,27 +214,12 @@ export async function POST(req: NextRequest) {
     hasCustomKey: !!userAISettings.apiKey,
   })
 
-  // Check XHS login status before attempting MCP search.
-  // If the status check itself fails (port 8001 temporarily unavailable), null is returned
-  // and we proceed — the MCP tools will surface a proper error if the session is truly invalid.
-  // Only block if we get a definitive non-logged-in status back.
-  const loginStatus = await checkLoginStatus(user.id).catch(() => null)
-  radarLog(rid, 'XHS_LOGIN', { status: loginStatus?.status ?? 'check_failed' })
-  if (loginStatus && loginStatus.status !== 'logged_in') {
-    const loginRequiredStream = new ReadableStream({
-      start(controller) {
-        controller.enqueue(sseFrame('xhs_login_required', { message: '请先登录小红书' }))
-        controller.close()
-      },
-    })
-    return new Response(loginRequiredStream, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-      },
-    })
-  }
+  // Skip the upfront checkLoginStatus() call — port 8001 tracks QR-scan state in
+  // memory and returns 'not_started' after a server restart even when the XHS
+  // cookies on disk are still valid. That causes a false xhs_login_required event
+  // and an infinite login loop. Instead, let the MCP tools try naturally; they will
+  // surface a real 'not_logged_in' error only when the session is genuinely expired.
+  radarLog(rid, 'XHS_LOGIN', { status: 'skipped_precheck' })
 
   // Build the @ai-sdk/anthropic provider with user settings
   const anthropicProvider = createAnthropic({

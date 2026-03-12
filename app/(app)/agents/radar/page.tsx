@@ -185,7 +185,7 @@ export default function RadarPage() {
       setError(err instanceof Error ? err.message : '网络请求失败')
       setIsLoading(false)
     }
-  }, [openQRModal])
+  }, [openQRModal, userId, refreshXHSStatus])
 
   const handleSearch = useCallback(async () => {
     if (!query.trim()) return

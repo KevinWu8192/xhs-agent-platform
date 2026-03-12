@@ -180,11 +180,9 @@ export function XHSQRModal({ userId, isOpen, onClose, onLoginSuccess }: XHSQRMod
       fetchQRCode()
     } else {
       clearAll()
-      // Reset server-side session on modal close
-      if (userId) {
-        fetch(`/api/xhs/reset?user_id=${encodeURIComponent(userId)}`).catch(() => {})
-      }
-      // Reset state so next open starts fresh
+      // Reset local UI state only — do NOT reset server-side session on close.
+      // Resetting the server session here would destroy a valid logged-in state
+      // and cause an infinite login loop when the page retries the search.
       setStatus('loading')
       setQrImageBase64(null)
       setSessionId(null)
