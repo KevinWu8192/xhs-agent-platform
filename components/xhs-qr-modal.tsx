@@ -180,6 +180,7 @@ export function XHSQRModal({ userId, isOpen, onClose, onLoginSuccess }: XHSQRMod
   }, [isOpen])
 
   // Cleanup on unmount
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => () => clearAll(), [])
 
   // ── Early return if not open ───────────────────────────────
