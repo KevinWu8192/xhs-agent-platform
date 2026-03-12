@@ -38,6 +38,15 @@ import { fetchXHSNotes } from '@/lib/xhs-client'
 import { createXHSMCPClient, searchXHS, checkLoginStatus } from '@/lib/xhs-mcp-client'
 
 // ---------------------------------------------------------------------------
+// Structured logger — PM2 captures stdout, grep with [RADAR:xxx]
+// ---------------------------------------------------------------------------
+function radarLog(rid: string, step: string, data?: Record<string, unknown>) {
+  const ts = new Date().toISOString().slice(11, 23) // HH:MM:SS.mmm
+  const extra = data ? ' ' + JSON.stringify(data, null, 0) : ''
+  console.log(`[RADAR:${rid}] [${ts}] ${step}${extra}`)
+}
+
+// ---------------------------------------------------------------------------
 // SSE helpers
 // ---------------------------------------------------------------------------
 const encoder = new TextEncoder()
@@ -122,9 +131,13 @@ function generateMockNotes(query: string, limit: number): XHSNote[] {
 // Route handler
 // ---------------------------------------------------------------------------
 export async function POST(req: NextRequest) {
+  // Short request ID for log correlation
+  const rid = Math.random().toString(36).slice(2, 8).toUpperCase()
+
   // 1. Auth check
   const user = await getAuthenticatedUser()
   if (!user) {
+    radarLog(rid, 'AUTH_FAIL', { reason: 'no user' })
     return Response.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -145,6 +158,7 @@ export async function POST(req: NextRequest) {
 
   const { query, conversation_id, filters } = body
   const limit = Math.min(body.limit ?? 20, 50)
+  radarLog(rid, 'REQUEST', { query, limit, user_id: user.id.slice(0, 8) })
 
   if (!query || typeof query !== 'string' || query.trim().length === 0) {
     return Response.json(
@@ -186,17 +200,26 @@ export async function POST(req: NextRequest) {
   // Validate that we have an API key before proceeding
   const apiKey = userAISettings.apiKey || process.env.ANTHROPIC_API_KEY
   if (!apiKey) {
+    radarLog(rid, 'NO_API_KEY')
     return Response.json(
       { error: 'API_KEY_NOT_CONFIGURED', message: '请先在「设置」页面配置你的 AI API Key' },
       { status: 422 }
     )
   }
 
+  const model = resolveModel(userAISettings)
+  radarLog(rid, 'MODEL_SETTINGS', {
+    model,
+    baseUrl: userAISettings.baseUrl ?? process.env.ANTHROPIC_BASE_URL ?? '(default)',
+    hasCustomKey: !!userAISettings.apiKey,
+  })
+
   // Check XHS login status before attempting MCP search.
   // If the status check itself fails (port 8001 temporarily unavailable), null is returned
   // and we proceed — the MCP tools will surface a proper error if the session is truly invalid.
   // Only block if we get a definitive non-logged-in status back.
   const loginStatus = await checkLoginStatus(user.id).catch(() => null)
+  radarLog(rid, 'XHS_LOGIN', { status: loginStatus?.status ?? 'check_failed' })
   if (loginStatus && loginStatus.status !== 'logged_in') {
     const loginRequiredStream = new ReadableStream({
       start(controller) {
@@ -212,8 +235,6 @@ export async function POST(req: NextRequest) {
       },
     })
   }
-
-  const model = resolveModel(userAISettings)
 
   // Build the @ai-sdk/anthropic provider with user settings
   const anthropicProvider = createAnthropic({
@@ -324,9 +345,11 @@ export async function POST(req: NextRequest) {
         let mcpClient: Awaited<ReturnType<typeof createXHSMCPClient>>['client'] | null = null
 
         try {
+          radarLog(rid, 'MCP_CONNECT', { url: 'http://localhost:8000/sse' })
           const { client, tools } = await createXHSMCPClient()
           mcpClient = client
           usedMCP = true
+          radarLog(rid, 'MCP_READY', { toolCount: Object.keys(tools).length })
 
           // System prompt tells Claude its identity and that it should always
           // pass the authenticated user's ID when calling MCP tools.
@@ -348,11 +371,32 @@ export async function POST(req: NextRequest) {
 
 ### 第三步：深度分析
 - **必须基于笔记的真实内容（正文+评论）进行分析，不能凭空生成**
-- 分析维度：内容趋势、用户痛点、爆款规律、差异化机会、创作建议、发布时机
+- 严格按以下格式输出分析报告：
+
+## 📊 内容趋势
+- 当前热门内容方向和话题（引用具体笔记标题）
+
+## 😣 用户痛点
+- 目标受众最关心的问题（来自评论分析）
+
+## 🔥 爆款规律
+- 高互动笔记的共同特征（标题风格、内容格式、字数范围）
+
+## 🌱 差异化机会
+- 当前未被充分覆盖的选题角度
+
+## ✍️ 创作建议
+- 3-5条具体可操作的建议，每条一行
+
+## ⏰ 最佳发布时机
+- 推荐的发布时间和频率（基于发布时间数据）
 
 ## 重要约束
 - 分析报告必须引用具体笔记内容（例如"某篇点赞最高的笔记写道…"）
+- 每个维度用 ## 标题，内容用 - 列表，不要长段落
+- 总字数控制在 800-1200 字
 - 不得在获取详情之前开始撰写分析报告
+- 直接输出分析，不要"好的"之类的开场白
 - 请用中文回复`
 
           const userPrompt = `请分析小红书上「${query}」相关内容，完成以下任务：
@@ -380,10 +424,24 @@ export async function POST(req: NextRequest) {
           let index = 0
           let notesEmitted = false
 
+          let textChars = 0
           // Process the stream
           for await (const part of result.fullStream) {
             switch (part.type) {
+              case 'tool-call': {
+                radarLog(rid, 'TOOL_CALL', {
+                  tool: part.toolName,
+                  args: JSON.stringify(part.args).slice(0, 200),
+                })
+                break
+              }
+
               case 'tool-result': {
+                radarLog(rid, 'TOOL_RESULT', {
+                  tool: part.toolName,
+                  isError: part.isError ?? false,
+                  preview: JSON.stringify(part.result).slice(0, 300),
+                })
                 // When Claude calls search_feeds, capture the returned notes
                 // and emit them as the "notes" SSE event
                 if (
@@ -425,6 +483,7 @@ export async function POST(req: NextRequest) {
 
               case 'text-delta': {
                 fullAnalysis += part.textDelta
+                textChars += part.textDelta.length
                 controller.enqueue(
                   sseFrame('delta', { type: 'delta', text: part.textDelta, index })
                 )
@@ -437,15 +496,16 @@ export async function POST(req: NextRequest) {
               }
 
               default:
-                // tool-call, finish, etc. — no action needed
                 break
             }
           }
 
+          radarLog(rid, 'STREAM_DONE', { textChars, notesEmitted, notesCount: notes.length })
+
           // If search_feeds was never called or returned empty (e.g. Claude
           // skipped the tool call), fall back to HTTP search
           if (!notesEmitted) {
-            console.warn('[Radar] MCP stream completed but search_feeds was not called or returned empty; falling back to HTTP search')
+            radarLog(rid, 'FALLBACK_HTTP', { reason: 'search_feeds not called or empty' })
             const fallback = await searchXHS(user.id, query, { limit, sort_by: '最多点赞' })
             notes = fallback.notes
             controller.enqueue(sseFrame('notes', notes))
@@ -526,11 +586,7 @@ export async function POST(req: NextRequest) {
             return
           }
 
-          if (usedMCP) {
-            console.error('[Radar] MCP streamText failed, falling back to HTTP search:', mcpErrMessage)
-          } else {
-            console.error('[Radar] MCP client connection failed, falling back to HTTP search:', mcpErrMessage)
-          }
+          radarLog(rid, usedMCP ? 'MCP_STREAM_FAIL' : 'MCP_CONNECT_FAIL', { error: mcpErrMessage.slice(0, 200) })
         } finally {
           // Always close the MCP client connection
           if (mcpClient) {
@@ -543,14 +599,17 @@ export async function POST(req: NextRequest) {
         }
 
         // Attempt 2: Legacy HTTP searchXHS (port 8001)
+        radarLog(rid, 'FALLBACK_HTTP_START')
         try {
           const xhsResponse = await searchXHS(user.id, query, {
             limit,
             sort_by: '最多点赞',
           })
           notes = xhsResponse.notes
+          radarLog(rid, 'FALLBACK_HTTP_OK', { count: notes.length })
         } catch (httpErr) {
           const httpErrMessage = httpErr instanceof Error ? httpErr.message : String(httpErr)
+          radarLog(rid, 'FALLBACK_HTTP_FAIL', { error: httpErrMessage.slice(0, 200) })
 
           if (httpErrMessage.includes('not_logged_in')) {
             controller.enqueue(
@@ -561,13 +620,15 @@ export async function POST(req: NextRequest) {
           }
 
           // Attempt 3: Legacy CLI client
-          console.error('[Radar] HTTP searchXHS failed, falling back to xhs-client:', httpErrMessage)
+          radarLog(rid, 'FALLBACK_CLI_START')
           try {
             const fallbackResponse = await fetchXHSNotes(query, { limit })
             notes = fallbackResponse.notes
+            radarLog(rid, 'FALLBACK_CLI_OK', { count: notes.length })
           } catch (cliErr) {
             // Attempt 4: Inline mock data
-            console.error('[Radar] xhs-client fallback also failed, using inline mock:', cliErr)
+            const cliErrMsg = cliErr instanceof Error ? cliErr.message : String(cliErr)
+            radarLog(rid, 'FALLBACK_MOCK', { reason: cliErrMsg.slice(0, 100) })
             notes = generateMockNotes(query, limit)
           }
         }
@@ -606,6 +667,7 @@ export async function POST(req: NextRequest) {
       // 6. Non-MCP analysis path: build prompt and stream with @ai-sdk/anthropic
       //    (used for cache hits and all fallback paths)
       // -----------------------------------------------------------------------
+      radarLog(rid, 'ANALYSIS_START', { notesCount: notes.length, isCached })
       try {
         const noteSummary = notes
           .slice(0, 10)
@@ -622,18 +684,36 @@ ${filterContext}
 搜索结果（共 ${notes.length} 条笔记，${isCached ? '来自缓存' : '实时数据'}）：
 ${noteSummary}
 
-请从以下维度分析：
-1. **内容趋势** — 当前热门内容方向和话题
-2. **用户痛点** — 目标受众最关心的问题
-3. **爆款规律** — 高互动笔记的共同特征
-4. **差异化机会** — 未被充分覆盖的选题角度
-5. **创作建议** — 3-5条具体的内容创作建议
-6. **最佳发布时机** — 推荐的发布时间和频率`
+请严格按以下格式输出，不要偏离结构：
+
+## 📊 内容趋势
+- 当前热门内容方向和话题（结合笔记标题和标签分析）
+
+## 😣 用户痛点
+- 目标受众最关心的问题（从高评论笔记反推）
+
+## 🔥 爆款规律
+- 高互动笔记的共同特征（标题风格、内容格式、字数范围）
+
+## 🌱 差异化机会
+- 当前未被充分覆盖的选题角度
+
+## ✍️ 创作建议
+- 3-5条具体可操作的建议，每条一行
+
+## ⏰ 最佳发布时机
+- 推荐的发布时间和频率
+
+**格式要求**：
+- 每个维度用 ## 标题开头
+- 内容用 - 列表，不要长段落
+- 总字数控制在 600-900 字
+- 只输出中文，不要多余解释`
 
         const result = streamText({
           model: anthropicProvider(model),
           messages: [{ role: 'user', content: analysisPrompt }],
-          maxTokens: 1500,
+          maxTokens: 2000,
         })
 
         let fullAnalysis = ''
