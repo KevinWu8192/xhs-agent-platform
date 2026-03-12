@@ -17,7 +17,8 @@ import { type SupabaseClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import type { Database } from './database.types'
 
-export type TypedSupabaseServerClient = SupabaseClient<Database>
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type TypedSupabaseServerClient = SupabaseClient<Database, any, any>
 
 /**
  * Creates a server-side Supabase client bound to the current request's cookies.
