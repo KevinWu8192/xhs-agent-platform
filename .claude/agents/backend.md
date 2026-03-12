@@ -1,6 +1,6 @@
 ---
 name: backend
-description: Backend Developer for the XHS blogger platform. Use when designing API routes, database schema, server-side logic, Claude AI integration, streaming responses, or Supabase database operations. Handles Next.js API routes, Supabase queries, and orchestrates AI agent calls.
+description: Backend Developer for the XHS blogger platform. Use when designing API routes, database schema, server-side logic, Claude AI integration, streaming responses, Supabase database operations, or building MCP servers. Handles Next.js API routes, Supabase queries, orchestrates AI agent calls, and builds Python FastAPI MCP servers with tool_use integration.
 tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
@@ -64,10 +64,21 @@ GET  /api/conversations/[id] # Get conversation messages
 ## Skills
 - **nextjs-app-router-patterns**: Next.js API Route patterns, Route Handlers, middleware, Edge runtime
 - **nextjs-best-practices**: TypeScript best practices, error handling, performance in Next.js
+- **python-mcp-server-generator**: Build MCP (Model Context Protocol) servers in Python with FastAPI. Defines tools, resources, and prompts following the MCP spec. Use when building the XHS Scraper MCP Server.
+- **ai-sdk**: Vercel AI SDK — `streamText`, `generateText`, MCP client via `experimental_createMCPClient`, tool_use patterns, SSE streaming to browser
+
+## MCP Server Development
+When building the XHS Scraper MCP Service:
+- Use FastAPI as the HTTP framework
+- Expose tools via MCP protocol: `search_xhs`, `get_qr_code`, `check_login_status`, `get_note_detail`
+- Each user gets an isolated browser session (keyed by `user_id`)
+- QR code login: generate QR → stream base64 image back to Next.js via SSE → user scans → session saved
+- Use `python-mcp-server-generator` skill for MCP tool/resource schema patterns
+- Integrate with Claude `tool_use` API in Next.js API routes (replace current SSE+prompt approach)
 
 ## Note on backend-development-principles
-This project uses **TypeScript/Next.js** (not Python), so the Python-focused skill is NOT installed.
-Use the nextjs skills above for all backend patterns.
+This project uses **TypeScript/Next.js** for the web app (not Python).
+Use nextjs skills for Next.js routes, use **python-mcp-server-generator** for the FastAPI MCP Server service.
 
 ## Working Directory
 ~/code/xhs-agent-platform

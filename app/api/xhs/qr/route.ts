@@ -3,9 +3,15 @@
  *
  * POST /api/xhs/qr
  *
- * Initiates XHS login by requesting a QR code from the MCP server.
+ * Initiates XHS login by requesting a QR code from the HTTP login server
+ * (http://localhost:8001).
+ *
  * The client should display the QR code image and then poll
  * GET /api/xhs/status until the status reaches 'logged_in'.
+ *
+ * NOTE: The QR / login flow uses the HTTP server on port 8001, NOT the
+ * MCP SSE server on port 8000. Port 8000 is the fastmcp SSE server used
+ * by the AI SDK for agentic tool calls.
  *
  * Request body (all fields optional):
  *   { "user_id"?: string }   — if omitted, uses the authenticated user's ID
@@ -39,13 +45,13 @@ export async function POST(req: NextRequest) {
     // Body is optional; ignore parse errors
   }
 
-  // 3. Call MCP server
+  // 3. Call HTTP login server (port 8001)
   try {
     const result = await getQRCode(userId)
     return Response.json(result)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.error('[/api/xhs/qr] MCP server error:', message)
+    console.error('[/api/xhs/qr] HTTP login server error:', message)
     return Response.json({ error: 'XHS_SERVICE_UNAVAILABLE' }, { status: 503 })
   }
 }

@@ -47,8 +47,10 @@ interface RadarResult {
 ```
 
 ## Skills
-- **xiaohongshu-skills-main**: XHS automation — search, collect notes, get trending topics
-- **nextjs-app-router-patterns**: For writing the Next.js API route that wraps XHS data collection into a streaming endpoint
+- **xiaohongshu-skills-main**: XHS automation — search, collect notes, get trending topics, QR code login
+- **python-mcp-server-generator**: Build MCP Server in Python/FastAPI, define MCP tools/resources following the spec
+- **mcp-builder**: Build proper MCP servers using fastmcp framework with `@mcp.tool()` decorators, SSE transport, proper MCP protocol compliance
+- **backend-development-principles**: FastAPI patterns, async Python, service architecture
 
 ## Working Directory
 ~/code/xhs-agent-platform

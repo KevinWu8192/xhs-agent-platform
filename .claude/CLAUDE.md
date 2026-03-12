@@ -25,6 +25,7 @@
 | backend | `.claude/agents/backend.md` | API路由、数据库、AI集成 |
 | xhs-agent | `.claude/agents/xhs-agent.md` | 小红书数据采集 |
 | qa | `.claude/agents/qa.md` | 测试、部署验证 |
+| devops-agent | `.claude/agents/devops-agent.md` | VPS配置、nginx、SSL、PM2、CI/CD |
 
 ## Milestones
 - [x] M0: Agent Team 创建
