@@ -1,11 +1,13 @@
+'use client'
+
 // ─────────────────────────────────────────────────────────────
 //  Sidebar — 左侧导航栏
 //  样式：小红书品牌粉红渐变背景，圆润卡片感
 //  包含：Logo 区、导航项、底部用户信息
 // ─────────────────────────────────────────────────────────────
 
-// NOTE: 此文件为纯 UI 草图，不含路由逻辑或状态管理
-// 实际集成时需替换 "active" 判断为 usePathname() 等
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 
 interface NavItem {
   id: string;
@@ -16,14 +18,6 @@ interface NavItem {
 }
 
 interface SidebarProps {
-  /** 当前激活的导航项 id */
-  activeId?: string;
-  /** 用户信息 */
-  user?: {
-    name: string;
-    avatarUrl?: string;
-    plan?: "free" | "pro";
-  };
   /** 折叠状态（预留） */
   collapsed?: boolean;
 }
@@ -77,11 +71,23 @@ const bottomNavItems: NavItem[] = [
   },
 ];
 
+function getActiveId(pathname: string): string {
+  if (pathname === '/dashboard') return 'dashboard'
+  if (pathname.startsWith('/agents/radar')) return 'radar'
+  if (pathname.startsWith('/agents/script')) return 'script'
+  if (pathname.startsWith('/agents/topics')) return 'topics'
+  if (pathname.startsWith('/agents/analytics')) return 'analytics'
+  if (pathname.startsWith('/settings')) return 'settings'
+  if (pathname.startsWith('/help')) return 'help'
+  return 'dashboard'
+}
+
 export function Sidebar({
-  activeId = "dashboard",
-  user = { name: "小红", plan: "free" },
   collapsed = false,
 }: SidebarProps) {
+  const pathname = usePathname()
+  const activeId = getActiveId(pathname)
+
   return (
     <aside
       className={[
@@ -95,14 +101,14 @@ export function Sidebar({
         // 定位
         "sticky top-0 h-screen",
         // 过渡
-        "transition-all duration-300 ease-smooth",
+        "transition-all duration-300",
         // 层级
         "z-sidebar",
       ].join(" ")}
     >
       {/* ── Logo 区域 ──────────────────────────────────────────── */}
       <div className="px-4 pt-6 pb-4">
-        <div className="flex items-center gap-3">
+        <Link href="/dashboard" className="flex items-center gap-3">
           {/* Logo 图标 */}
           <div
             className={[
@@ -125,14 +131,14 @@ export function Sidebar({
               <p className="text-white/60 text-xs whitespace-nowrap">博主创作平台</p>
             </div>
           )}
-        </div>
+        </Link>
       </div>
 
       {/* ── 分隔线 ─────────────────────────────────────────────── */}
       <div className="mx-4 h-px bg-white/15 mb-2" />
 
       {/* ── 主导航区 ───────────────────────────────────────────── */}
-      <nav className="flex-1 px-3 py-2 space-y-1 overflow-y-auto scrollbar-hide">
+      <nav className="flex-1 px-3 py-2 space-y-1 overflow-y-auto">
         {/* 分组标签（展开时显示） */}
         {!collapsed && (
           <p className="px-3 mb-2 text-white/40 text-xs font-medium uppercase tracking-wider">
@@ -163,55 +169,17 @@ export function Sidebar({
         ))}
       </div>
 
-      {/* ── 用户信息区 ─────────────────────────────────────────── */}
+      {/* ── 用户信息区（由 UserAvatarMenu 接管） ──────────────── */}
       <div className="px-3 pb-5 pt-2">
         <div className="mx-1 h-px bg-white/15 mb-3" />
-
-        <div
-          className={[
-            "flex items-center",
-            collapsed ? "justify-center" : "gap-3 px-2",
-            "py-2 rounded-xl",
-            "hover:bg-white/10 transition-colors duration-150 cursor-pointer",
-          ].join(" ")}
-        >
-          {/* 用户头像 */}
-          <UserAvatar name={user.name} avatarUrl={user.avatarUrl} />
-
-          {/* 用户信息文字（展开时显示） */}
-          {!collapsed && (
-            <div className="flex-1 min-w-0 overflow-hidden">
-              <p className="text-white text-sm font-medium truncate">{user.name}</p>
-              <div className="flex items-center gap-1 mt-0.5">
-                <span
-                  className={[
-                    "inline-flex items-center",
-                    "px-1.5 py-0.5 rounded-full text-2xs font-medium",
-                    user.plan === "pro"
-                      ? "bg-yellow-400/20 text-yellow-300"
-                      : "bg-white/15 text-white/70",
-                  ].join(" ")}
-                >
-                  {user.plan === "pro" ? "✦ Pro" : "Free"}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* 更多按钮 */}
-          {!collapsed && (
-            <button className="text-white/50 hover:text-white transition-colors p-1 rounded-lg hover:bg-white/10">
-              <span className="text-sm">•••</span>
-            </button>
-          )}
-        </div>
+        <SidebarUserMenu collapsed={collapsed} />
       </div>
     </aside>
   );
 }
 
 // ─────────────────────────────────────────────────────────────
-//  NavItemButton — 单个导航项
+//  NavItemButton — 单个导航项（Link 版本）
 // ─────────────────────────────────────────────────────────────
 
 interface NavItemButtonProps {
@@ -222,7 +190,8 @@ interface NavItemButtonProps {
 
 function NavItemButton({ item, isActive, collapsed }: NavItemButtonProps) {
   return (
-    <button
+    <Link
+      href={item.href}
       className={[
         "w-full flex items-center rounded-xl",
         collapsed ? "justify-center p-3" : "gap-3 px-3 py-2.5",
@@ -237,7 +206,7 @@ function NavItemButton({ item, isActive, collapsed }: NavItemButtonProps) {
       <span
         className={[
           "text-lg shrink-0 transition-transform duration-150",
-          isActive ? "scale-110" : "group-hover:scale-105",
+          isActive ? "scale-110" : "",
         ].join(" ")}
         aria-hidden="true"
       >
@@ -267,53 +236,30 @@ function NavItemButton({ item, isActive, collapsed }: NavItemButtonProps) {
       {!collapsed && isActive && (
         <div className="w-1 h-4 rounded-full bg-white shrink-0" />
       )}
-    </button>
+    </Link>
   );
 }
 
 // ─────────────────────────────────────────────────────────────
-//  UserAvatar — 用户头像
+//  SidebarUserMenu — 侧边栏底部用户区域（动态导入 UserAvatarMenu）
 // ─────────────────────────────────────────────────────────────
 
-interface UserAvatarProps {
-  name: string;
-  avatarUrl?: string;
-  size?: "sm" | "md" | "lg";
+import { UserAvatarMenu } from '@/components/user-avatar'
+
+interface SidebarUserMenuProps {
+  collapsed: boolean;
 }
 
-function UserAvatar({ name, avatarUrl, size = "md" }: UserAvatarProps) {
-  const sizeMap = {
-    sm: "w-7 h-7 text-xs",
-    md: "w-9 h-9 text-sm",
-    lg: "w-12 h-12 text-base",
-  };
-
-  const initials = name
-    .slice(0, 2)
-    .split("")
-    .join("");
-
-  if (avatarUrl) {
-    return (
-      <img
-        src={avatarUrl}
-        alt={name}
-        className={`${sizeMap[size]} rounded-full object-cover shrink-0 border-2 border-white/30`}
-      />
-    );
-  }
-
+function SidebarUserMenu({ collapsed }: SidebarUserMenuProps) {
   return (
     <div
       className={[
-        sizeMap[size],
-        "rounded-full shrink-0",
-        "bg-white/25 border border-white/30",
-        "flex items-center justify-center",
-        "font-semibold text-white",
+        "flex items-center",
+        collapsed ? "justify-center" : "gap-3 px-2",
+        "py-2 rounded-xl",
       ].join(" ")}
     >
-      {initials}
+      <UserAvatarMenu collapsed={collapsed} />
     </div>
-  );
+  )
 }

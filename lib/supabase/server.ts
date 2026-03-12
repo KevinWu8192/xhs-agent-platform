@@ -13,10 +13,11 @@
  */
 
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
+import { type SupabaseClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import type { Database } from './database.types'
 
-export type TypedSupabaseServerClient = ReturnType<typeof createServerClient<Database>>
+export type TypedSupabaseServerClient = SupabaseClient<Database>
 
 /**
  * Creates a server-side Supabase client bound to the current request's cookies.
