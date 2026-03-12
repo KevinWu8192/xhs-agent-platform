@@ -153,6 +153,13 @@ def set_logged_in(user_id: str) -> None:
     _save_session(user_id, record)
 
 
+def set_not_started(user_id: str) -> None:
+    """Reset a session to not_started (e.g. on modal open to clear stale state)."""
+    record = _load_session(user_id) or {}
+    record.update({"status": "not_started", "updated_at": _now_iso()})
+    _save_session(user_id, record)
+
+
 def set_expired(user_id: str) -> None:
     """Force-expire a session (e.g. on explicit logout)."""
     record = _load_session(user_id) or {}

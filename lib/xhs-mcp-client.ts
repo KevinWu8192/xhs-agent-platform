@@ -124,6 +124,13 @@ export async function getQRCode(userId: string): Promise<{
   qr_image_base64?: string
   session_id?: string
 }> {
+  // Reset session first to clear any stale pending/expired state from a
+  // previous session.  Errors are swallowed so a reset failure never blocks
+  // the QR code fetch.
+  await fetch(
+    `${MCP_HTTP_URL}/qr-reset?user_id=${encodeURIComponent(userId)}`
+  ).catch(() => {})
+
   const res = await fetch(
     `${MCP_HTTP_URL}/qr-login?user_id=${encodeURIComponent(userId)}`
   )

@@ -165,6 +165,14 @@ export function XHSQRModal({ userId, isOpen, onClose, onLoginSuccess }: XHSQRMod
 
   useEffect(() => {
     if (isOpen) {
+      // Reset ALL internal state synchronously before fetching so the modal
+      // never briefly shows stale state from a previous session on reopen.
+      clearAll()
+      setStatus('loading')
+      setQrImageBase64(null)
+      setSessionId(null)
+      setErrorMessage(null)
+      setSecondsLeft(QR_TTL_SECONDS)
       fetchQRCode()
     } else {
       clearAll()

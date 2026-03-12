@@ -37,6 +37,7 @@ from session_manager import (
     get_status,
     is_logged_in,
     set_logged_in,
+    set_not_started,
     set_pending,
 )
 
@@ -190,6 +191,14 @@ async def get_qr_code(user_id: str) -> dict[str, Any]:
     # Fast path: already logged in
     if is_logged_in(user_id):
         return {"status": "already_logged_in"}
+
+    # Reset any stale pending/expired state so we always start from a clean
+    # slate when requesting a new QR code.  Without this, a leftover "pending"
+    # file from a previous session causes check_login_status() to probe Chrome
+    # and potentially return a false "logged_in" from cached browser state.
+    current_status = get_status(user_id)
+    if current_status in ("pending", "expired"):
+        set_not_started(user_id)
 
     acct = ensure_account_exists(user_id)
 

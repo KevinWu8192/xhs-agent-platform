@@ -37,7 +37,7 @@ from pydantic import BaseModel
 from typing import Any
 
 from tools.qr_login import get_qr_code, check_login_status as qr_check_status
-from session_manager import get_status
+from session_manager import get_status, set_not_started
 
 logging.basicConfig(
     level=logging.INFO,
@@ -80,6 +80,27 @@ app.add_middleware(
 async def health():
     """Liveness probe — returns 200 OK if the service is running."""
     return {"status": "ok", "service": "xhs-http-app"}
+
+
+# ---------------------------------------------------------------------------
+# GET /qr-reset
+# ---------------------------------------------------------------------------
+
+@app.get("/qr-reset")
+async def qr_reset(user_id: str = Query(..., description="Supabase user ID")) -> dict:
+    """
+    Clear session state so the QR modal can start fresh.
+
+    Resets a pending or expired session back to not_started so that the next
+    call to /qr-login always triggers a new QR code fetch instead of reading
+    stale state from a previous session.
+    """
+    if not user_id or not user_id.strip():
+        raise HTTPException(status_code=400, detail="user_id is required")
+
+    logger.info("QR reset requested for user_id=%s", user_id)
+    set_not_started(user_id.strip())
+    return {"status": "reset"}
 
 
 # ---------------------------------------------------------------------------
