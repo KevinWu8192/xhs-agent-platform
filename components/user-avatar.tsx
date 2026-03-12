@@ -61,7 +61,7 @@ export function UserAvatarMenu({ collapsed = false }: UserAvatarMenuProps) {
       <div className="relative" ref={menuRef}>
         <button
           onClick={() => setIsOpen(!isOpen)}
-          className="w-9 h-9 rounded-full bg-white/25 border border-white/30 flex items-center justify-center font-semibold text-white text-sm hover:bg-white/35 transition-colors"
+          className="w-9 h-9 rounded-full bg-gradient-to-br from-rose-400 to-pink-500 flex items-center justify-center font-semibold text-white text-sm hover:opacity-90 transition-opacity"
           title={displayName}
         >
           {initials}
@@ -91,25 +91,25 @@ export function UserAvatarMenu({ collapsed = false }: UserAvatarMenuProps) {
     <div className="relative w-full" ref={menuRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-white/10 transition-colors duration-150 cursor-pointer"
+        className="w-full flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-rose-50 transition-colors duration-150 cursor-pointer"
       >
         {/* 用户头像 */}
-        <div className="w-9 h-9 rounded-full shrink-0 bg-white/25 border border-white/30 flex items-center justify-center font-semibold text-white text-sm">
+        <div className="w-9 h-9 rounded-full shrink-0 bg-gradient-to-br from-rose-400 to-pink-500 flex items-center justify-center font-semibold text-white text-sm">
           {initials}
         </div>
 
         {/* 用户信息文字 */}
         <div className="flex-1 min-w-0 overflow-hidden text-left">
-          <p className="text-white text-sm font-medium truncate">{displayName || '加载中...'}</p>
+          <p className="text-neutral-800 text-sm font-medium truncate">{displayName || '加载中...'}</p>
           <div className="flex items-center gap-1 mt-0.5">
-            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-white/15 text-white/70">
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-neutral-100 text-neutral-500">
               Free
             </span>
           </div>
         </div>
 
         {/* 更多按钮 */}
-        <span className="text-white/50 hover:text-white transition-colors p-1 rounded-lg hover:bg-white/10 text-sm">
+        <span className="text-neutral-400 hover:text-neutral-600 transition-colors p-1 rounded-lg hover:bg-neutral-100 text-sm">
           •••
         </span>
       </button>

@@ -98,8 +98,8 @@ export function Sidebar({
         "min-h-screen",
         "flex flex-col",
         "shrink-0",
-        // 背景：品牌粉红渐变
-        "bg-gradient-to-b from-[#FF2442] to-[#C41832]",
+        // 背景：白底 + 右侧细线
+        "bg-white border-r border-neutral-100",
         // 定位
         "sticky top-0 h-screen",
         // 过渡
@@ -116,7 +116,7 @@ export function Sidebar({
             className={[
               "flex items-center justify-center",
               "w-10 h-10 rounded-2xl",
-              "bg-white/20 backdrop-blur-sm",
+              "bg-gradient-to-br from-rose-400 to-pink-500",
               "text-2xl",
               "shrink-0",
             ].join(" ")}
@@ -127,23 +127,23 @@ export function Sidebar({
           {/* Logo 文字（展开时显示） */}
           {!collapsed && (
             <div className="overflow-hidden">
-              <p className="text-white font-bold text-lg leading-tight whitespace-nowrap">
+              <p className="text-neutral-900 font-bold text-lg leading-tight whitespace-nowrap">
                 XHS 助手
               </p>
-              <p className="text-white/60 text-xs whitespace-nowrap">博主创作平台</p>
+              <p className="text-neutral-400 text-xs whitespace-nowrap">博主创作平台</p>
             </div>
           )}
         </Link>
       </div>
 
       {/* ── 分隔线 ─────────────────────────────────────────────── */}
-      <div className="mx-4 h-px bg-white/15 mb-2" />
+      <div className="mx-4 h-px bg-neutral-100 mb-2" />
 
       {/* ── 主导航区 ───────────────────────────────────────────── */}
       <nav className="flex-1 px-3 py-2 space-y-1 overflow-y-auto">
         {/* 分组标签（展开时显示） */}
         {!collapsed && (
-          <p className="px-3 mb-2 text-white/40 text-xs font-medium uppercase tracking-wider">
+          <p className="px-3 mb-2 text-neutral-400 text-xs font-medium uppercase tracking-wider">
             AI Agent
           </p>
         )}
@@ -160,7 +160,7 @@ export function Sidebar({
 
       {/* ── 底部导航 ───────────────────────────────────────────── */}
       <div className="px-3 py-2 space-y-1">
-        <div className="mx-1 h-px bg-white/15 mb-2" />
+        <div className="mx-1 h-px bg-neutral-100 mb-2" />
         {bottomNavItems.map((item) => (
           <NavItemButton
             key={item.id}
@@ -173,7 +173,7 @@ export function Sidebar({
 
       {/* ── 用户信息区（由 UserAvatarMenu 接管） ──────────────── */}
       <div className="px-3 pb-5 pt-2">
-        <div className="mx-1 h-px bg-white/15 mb-3" />
+        <div className="mx-1 h-px bg-neutral-100 mb-3" />
         <SidebarUserMenu collapsed={collapsed} />
       </div>
     </aside>
@@ -201,8 +201,8 @@ function NavItemButton({ item, isActive, collapsed }: NavItemButtonProps) {
         collapsed ? "justify-center p-3" : "gap-3 px-3 py-2.5",
         "text-left transition-all duration-150",
         isActive
-          ? "bg-white/20 text-white font-medium shadow-sm"
-          : "text-white/75 hover:text-white hover:bg-white/10",
+          ? "bg-rose-50 text-rose-500 font-medium"
+          : "text-neutral-600 hover:text-rose-500 hover:bg-rose-50",
       ].join(" ")}
       title={collapsed ? item.label : undefined}
     >
@@ -238,7 +238,7 @@ function NavItemButton({ item, isActive, collapsed }: NavItemButtonProps) {
           className={[
             "flex items-center justify-center",
             "w-5 h-5 rounded-full text-xs font-bold",
-            "bg-white text-primary-500",
+            "bg-rose-500 text-white",
             "shrink-0",
           ].join(" ")}
         >
@@ -248,7 +248,7 @@ function NavItemButton({ item, isActive, collapsed }: NavItemButtonProps) {
 
       {/* 激活指示条（展开时右侧） */}
       {!collapsed && isActive && (
-        <div className="w-1 h-4 rounded-full bg-white shrink-0" />
+        <div className="w-1 h-4 rounded-full bg-rose-400 shrink-0" />
       )}
     </Link>
   );
