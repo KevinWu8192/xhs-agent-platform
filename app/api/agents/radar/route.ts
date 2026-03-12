@@ -23,6 +23,7 @@ import { createClient, getAuthenticatedUser } from '@/lib/supabase/server'
 import { createAnthropicClient, resolveModel, MissingAPIKeyError } from '@/lib/claude'
 import type { XHSNote, AgentType, RadarSearchResult } from '@/types'
 import { fetchXHSNotes } from '@/lib/xhs-client'
+import { searchXHS } from '@/lib/xhs-mcp-client'
 
 // ---------------------------------------------------------------------------
 // SSE helpers
@@ -251,7 +252,7 @@ export async function POST(req: NextRequest) {
     .limit(1)
     .single()
 
-  let notes: XHSNote[]
+  let notes: XHSNote[] = []
   let radarResultId: string
   let isCached = false
 
@@ -261,14 +262,50 @@ export async function POST(req: NextRequest) {
     radarResultId = cachedResult.id
     isCached = true
   } else {
-    // Cache miss — try real XHS data (Phase 2), fall back to mock on failure
+    // Cache miss — try MCP server, fall back to legacy CLI mock on failure
     const searchStart = Date.now()
     try {
-      const xhsResponse = await fetchXHSNotes(query, { limit })
+      const xhsResponse = await searchXHS(user.id, query, {
+        limit,
+        sort_by: '最多点赞',
+      })
       notes = xhsResponse.notes
     } catch (err) {
-      console.error('[Radar] XHS fetch failed, using mock:', err)
-      notes = generateMockNotes(query, limit)
+      const errMessage = err instanceof Error ? err.message : String(err)
+
+      // User is not logged in to XHS — emit a login-required event and close
+      // the stream immediately so the client can redirect to the QR flow.
+      if (errMessage.includes('not_logged_in')) {
+        const loginRequiredStream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              sseFrame('xhs_login_required', {
+                message: '请先登录小红书',
+              })
+            )
+            controller.close()
+          },
+        })
+        return new Response(loginRequiredStream, {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            Connection: 'keep-alive',
+          },
+        })
+      }
+
+      // MCP server is unreachable or returned another error — graceful
+      // degradation: fall back to the legacy CLI client (which itself falls
+      // back to mock data if Chrome / the CLI is unavailable).
+      console.error('[Radar] MCP searchXHS failed, falling back to xhs-client:', errMessage)
+      try {
+        const fallbackResponse = await fetchXHSNotes(query, { limit })
+        notes = fallbackResponse.notes
+      } catch (fallbackErr) {
+        console.error('[Radar] xhs-client fallback also failed, using inline mock:', fallbackErr)
+        notes = generateMockNotes(query, limit)
+      }
     }
 
     const searchResult: RadarSearchResult = {

@@ -3,11 +3,14 @@
 // ─────────────────────────────────────────────────────────────
 //  Radar Agent Page — 信息雷达
 //  搜索框 + 笔记列表 + AI Insights 流式展示
+//  + XHS 小红书登录状态检测 & QR 码弹窗
 // ─────────────────────────────────────────────────────────────
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import Link from 'next/link'
 import type { XHSNote } from '@/types'
+import { createClient } from '@/lib/supabase/client'
+import { useXHSSession } from '@/hooks/use-xhs-session'
 
 const PLATFORMS = ['全部平台', '小红书', '微博', '抖音', 'B站'] as const
 const TIME_FILTERS = ['最近 24 小时', '最近 3 天', '最近 7 天'] as const
@@ -24,8 +27,41 @@ export default function RadarPage() {
   const [hasSearched, setHasSearched] = useState(false)
   const [activePlatform, setActivePlatform] = useState('全部平台')
 
-  const handleSearch = useCallback(async () => {
-    if (!query.trim()) return
+  // ── Supabase user ID ───────────────────────────────────────
+  const [userId, setUserId] = useState<string>('')
+
+  useEffect(() => {
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data }) => {
+      setUserId(data.user?.id ?? '')
+    })
+  }, [])
+
+  // ── XHS session hook ───────────────────────────────────────
+  const {
+    status: xhsStatus,
+    isLoading: xhsStatusLoading,
+    openQRModal,
+    QRModal,
+  } = useXHSSession(userId)
+
+  // ── Pending query: run search after login succeeds ────────
+  const [pendingQuery, setPendingQuery] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (xhsStatus === 'logged_in' && pendingQuery) {
+      setQuery(pendingQuery)
+      setPendingQuery(null)
+      // Trigger search with the pending query
+      runSearch(pendingQuery)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [xhsStatus, pendingQuery])
+
+  // ── Search logic ───────────────────────────────────────────
+
+  const runSearch = useCallback(async (searchQuery: string) => {
+    if (!searchQuery.trim()) return
 
     setIsLoading(true)
     setNotes([])
@@ -38,7 +74,7 @@ export default function RadarPage() {
       const response = await fetch('/api/agents/radar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: query.trim(), limit: 10 }),
+        body: JSON.stringify({ query: searchQuery.trim(), limit: 10 }),
       })
 
       if (!response.ok) {
@@ -106,7 +142,20 @@ export default function RadarPage() {
       setError(err instanceof Error ? err.message : '网络请求失败')
       setIsLoading(false)
     }
-  }, [query])
+  }, [])
+
+  const handleSearch = useCallback(async () => {
+    if (!query.trim()) return
+
+    // If XHS not logged in, save query as pending and open modal
+    if (xhsStatus === 'not_logged_in') {
+      setPendingQuery(query.trim())
+      openQRModal()
+      return
+    }
+
+    runSearch(query)
+  }, [query, xhsStatus, openQRModal, runSearch])
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') handleSearch()
@@ -115,6 +164,9 @@ export default function RadarPage() {
   function handleSuggestedKeyword(kw: string) {
     setQuery(kw)
   }
+
+  // ── Whether search is effectively disabled ─────────────────
+  const searchDisabled = isLoading || !query.trim()
 
   return (
     <div className="flex flex-col h-full space-y-5 animate-fade-in">
@@ -137,15 +189,47 @@ export default function RadarPage() {
           </div>
         </div>
 
-        {/* 自动刷新标签 */}
-        <div className="flex items-center gap-2 text-xs text-neutral-500 bg-white px-3 py-2 rounded-full shadow-sm">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse-gentle" />
-          <span>每 15 分钟自动刷新</span>
+        <div className="flex items-center gap-3">
+          {/* XHS connection status indicator */}
+          {!xhsStatusLoading && xhsStatus === 'logged_in' && (
+            <div className="flex items-center gap-1.5 text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-full">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              <span>小红书已连接</span>
+            </div>
+          )}
+
+          {/* 自动刷新标签 */}
+          <div className="flex items-center gap-2 text-xs text-neutral-500 bg-white px-3 py-2 rounded-full shadow-sm">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse-gentle" />
+            <span>每 15 分钟自动刷新</span>
+          </div>
         </div>
       </div>
 
+      {/* ── XHS 登录提示横幅 ────────────────────────────────────── */}
+      {!xhsStatusLoading && xhsStatus === 'not_logged_in' && (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200">
+          <span className="text-lg shrink-0">⚠️</span>
+          <p className="text-sm text-amber-800 flex-1">
+            需要登录小红书账号才能获取真实数据
+          </p>
+          <button
+            onClick={openQRModal}
+            className={[
+              'shrink-0 h-8 px-4 rounded-lg',
+              'bg-gradient-to-r from-rose-500 to-pink-500',
+              'text-white text-xs font-medium',
+              'shadow-sm hover:shadow-glow-sm',
+              'transition-all duration-150 active:scale-[0.98]',
+            ].join(' ')}
+          >
+            登录小红书
+          </button>
+        </div>
+      )}
+
       {/* ── 大号搜索框 ─────────────────────────────────────────── */}
-      <div className="relative">
+      <div className="relative group">
         <div className="absolute left-5 top-1/2 -translate-y-1/2 text-neutral-400 text-xl pointer-events-none">
           🔍
         </div>
@@ -155,7 +239,13 @@ export default function RadarPage() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="搜索热点话题、关键词... 例如：秋冬穿搭、美食打卡"
+          placeholder={
+            xhsStatus === 'not_logged_in'
+              ? '登录小红书后即可搜索...'
+              : '搜索热点话题、关键词... 例如：秋冬穿搭、美食打卡'
+          }
+          disabled={xhsStatus === 'not_logged_in'}
+          title={xhsStatus === 'not_logged_in' ? '请先登录小红书账号' : undefined}
           className={[
             'w-full',
             'h-14 pl-14 pr-32',
@@ -166,11 +256,14 @@ export default function RadarPage() {
             'transition-all duration-200',
             'focus:outline-none focus:border-rose-400 focus:shadow-card-md',
             'focus:ring-4 focus:ring-rose-100',
+            xhsStatus === 'not_logged_in'
+              ? 'opacity-60 cursor-not-allowed bg-neutral-50'
+              : '',
           ].join(' ')}
         />
 
         <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
-          {query && (
+          {query && xhsStatus !== 'not_logged_in' && (
             <button
               onClick={() => setQuery('')}
               className="text-neutral-300 hover:text-neutral-500 p-1 transition-colors"
@@ -181,7 +274,8 @@ export default function RadarPage() {
 
           <button
             onClick={handleSearch}
-            disabled={isLoading || !query.trim()}
+            disabled={searchDisabled}
+            title={xhsStatus === 'not_logged_in' ? '请先登录小红书账号' : undefined}
             className={[
               'h-9 px-5 rounded-xl',
               'bg-gradient-to-r from-rose-500 to-pink-500',
@@ -355,6 +449,9 @@ export default function RadarPage() {
           </div>
         </div>
       )}
+
+      {/* ── QR 登录弹窗（由 useXHSSession 管理）────────────────── */}
+      {QRModal}
     </div>
   )
 }
