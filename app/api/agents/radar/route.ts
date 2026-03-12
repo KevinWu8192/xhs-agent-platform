@@ -426,7 +426,6 @@ export async function POST(req: NextRequest) {
               case 'tool-result': {
                 radarLog(rid, 'TOOL_RESULT', {
                   tool: part.toolName,
-                  isError: part.isError ?? false,
                   preview: JSON.stringify(part.result).slice(0, 300),
                 })
                 // When Claude calls search_feeds, capture the returned notes
