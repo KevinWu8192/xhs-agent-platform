@@ -11,13 +11,46 @@ import Anthropic from '@anthropic-ai/sdk'
 // Client singleton
 // ---------------------------------------------------------------------------
 
+// Default client using env vars (fallback when user has no custom settings)
 export const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
+  ...(process.env.ANTHROPIC_BASE_URL && { baseURL: process.env.ANTHROPIC_BASE_URL }),
 })
 
 // Default model — overridable via environment variable
 export const DEFAULT_MODEL =
   process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-6'
+
+// ---------------------------------------------------------------------------
+// Per-user client factory (for custom API URL / key / model from settings)
+// ---------------------------------------------------------------------------
+
+export interface UserAISettings {
+  apiKey?: string | null
+  baseUrl?: string | null
+  model?: string | null
+}
+
+/**
+ * Returns an Anthropic client configured with the user's custom settings,
+ * falling back to environment variables if not set.
+ */
+export function createAnthropicClient(userSettings?: UserAISettings | null): Anthropic {
+  const apiKey = userSettings?.apiKey || process.env.ANTHROPIC_API_KEY || ''
+  const baseURL = userSettings?.baseUrl || process.env.ANTHROPIC_BASE_URL
+
+  return new Anthropic({
+    apiKey,
+    ...(baseURL && { baseURL }),
+  })
+}
+
+/**
+ * Resolves the model to use: user setting → env var → hardcoded default
+ */
+export function resolveModel(userSettings?: UserAISettings | null): string {
+  return userSettings?.model || DEFAULT_MODEL
+}
 
 // ---------------------------------------------------------------------------
 // SSE streaming helper

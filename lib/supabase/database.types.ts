@@ -39,6 +39,9 @@ export interface Database {
           bio: string | null
           xhs_handle: string | null
           preferences: UserPreferences
+          ai_api_key: string | null
+          ai_base_url: string | null
+          ai_model: string | null
           created_at: string
           updated_at: string
         }
@@ -50,6 +53,9 @@ export interface Database {
           bio?: string | null
           xhs_handle?: string | null
           preferences?: UserPreferences
+          ai_api_key?: string | null
+          ai_base_url?: string | null
+          ai_model?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -61,6 +67,9 @@ export interface Database {
           bio?: string | null
           xhs_handle?: string | null
           preferences?: UserPreferences
+          ai_api_key?: string | null
+          ai_base_url?: string | null
+          ai_model?: string | null
           created_at?: string
           updated_at?: string
         }

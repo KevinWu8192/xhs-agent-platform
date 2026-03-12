@@ -14,9 +14,8 @@
  */
 
 import { NextRequest } from 'next/server'
-import Anthropic from '@anthropic-ai/sdk'
 import { createClient, getAuthenticatedUser } from '@/lib/supabase/server'
-import { DEFAULT_MODEL } from '@/lib/claude'
+import { createAnthropicClient, resolveModel } from '@/lib/claude'
 import type { AgentType, ScriptStyle, ScriptTone } from '@/types'
 
 // ---------------------------------------------------------------------------
@@ -124,8 +123,24 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  // 3. Supabase — find or create conversation
+  // 3. Supabase — load user AI settings and find or create conversation
   const supabase = createClient()
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('ai_api_key, ai_base_url, ai_model')
+    .eq('user_id', user.id)
+    .single()
+
+  const userAISettings = {
+    apiKey: profile?.ai_api_key,
+    baseUrl: profile?.ai_base_url,
+    model: profile?.ai_model,
+  }
+
+  const client = createAnthropicClient(userAISettings)
+  const model = resolveModel(userAISettings)
+
   let convId = conversation_id ?? null
 
   if (!convId) {
@@ -155,7 +170,7 @@ export async function POST(req: NextRequest) {
 
   // Insert user message
   const userContent = `请为「${topic}」写一篇小红书视频脚本`
-  const { data: userMsg } = await supabase
+  await supabase
     .from('messages')
     .insert({
       conversation_id: convId,
@@ -163,8 +178,6 @@ export async function POST(req: NextRequest) {
       content: userContent,
       metadata: null,
     })
-    .select()
-    .single()
 
   // Pre-create assistant message placeholder to get an ID
   const { data: assistantMsg } = await supabase
@@ -175,7 +188,7 @@ export async function POST(req: NextRequest) {
       content: '',
       metadata: {
         agent_type: 'script' as AgentType,
-        model: DEFAULT_MODEL,
+        model,
       },
     })
     .select()
@@ -225,9 +238,8 @@ export async function POST(req: NextRequest) {
           })
         )
 
-        const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-        const stream = await anthropic.messages.stream({
-          model: DEFAULT_MODEL,
+        const stream = await client.messages.stream({
+          model,
           max_tokens: 2000,
           system: systemPrompt,
           messages: [{ role: 'user', content: userContent }],
@@ -261,7 +273,7 @@ export async function POST(req: NextRequest) {
               content: fullText,
               metadata: {
                 agent_type: 'script' as AgentType,
-                model: DEFAULT_MODEL,
+                model,
                 tokens_used: usage.input_tokens + usage.output_tokens,
               },
             })

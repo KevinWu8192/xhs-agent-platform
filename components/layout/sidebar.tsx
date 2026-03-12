@@ -8,11 +8,13 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { Settings, type LucideIcon } from 'lucide-react'
 
 interface NavItem {
   id: string;
   label: string;
-  emoji: string;
+  emoji?: string;
+  icon?: LucideIcon;
   href: string;
   badge?: number;
 }
@@ -60,7 +62,7 @@ const bottomNavItems: NavItem[] = [
   {
     id: "settings",
     label: "设置",
-    emoji: "⚙️",
+    icon: Settings,
     href: "/settings",
   },
   {
@@ -189,6 +191,8 @@ interface NavItemButtonProps {
 }
 
 function NavItemButton({ item, isActive, collapsed }: NavItemButtonProps) {
+  const IconComponent = item.icon
+
   return (
     <Link
       href={item.href}
@@ -202,16 +206,26 @@ function NavItemButton({ item, isActive, collapsed }: NavItemButtonProps) {
       ].join(" ")}
       title={collapsed ? item.label : undefined}
     >
-      {/* Emoji 图标 */}
-      <span
-        className={[
-          "text-lg shrink-0 transition-transform duration-150",
-          isActive ? "scale-110" : "",
-        ].join(" ")}
-        aria-hidden="true"
-      >
-        {item.emoji}
-      </span>
+      {/* 图标：lucide icon 或 emoji */}
+      {IconComponent ? (
+        <IconComponent
+          className={[
+            "w-5 h-5 shrink-0 transition-transform duration-150",
+            isActive ? "scale-110" : "",
+          ].join(" ")}
+          aria-hidden="true"
+        />
+      ) : (
+        <span
+          className={[
+            "text-lg shrink-0 transition-transform duration-150",
+            isActive ? "scale-110" : "",
+          ].join(" ")}
+          aria-hidden="true"
+        >
+          {item.emoji}
+        </span>
+      )}
 
       {/* 文字标签（展开时显示） */}
       {!collapsed && (
