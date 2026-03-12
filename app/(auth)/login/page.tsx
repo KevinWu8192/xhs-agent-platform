@@ -20,15 +20,20 @@ export default function LoginPage() {
     setLoading(true)
     setError(null)
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password })
 
-    if (error) {
-      setError(error.message)
+      if (error) {
+        setError(error.message)
+        return
+      }
+
+      // Full page reload ensures cookies are sent with the next request,
+      // so the server-side middleware can read the Supabase session correctly.
+      window.location.href = '/dashboard'
+    } finally {
       setLoading(false)
-      return
     }
-
-    router.push('/dashboard')
   }
 
   async function handleGoogleLogin() {
