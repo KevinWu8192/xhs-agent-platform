@@ -33,6 +33,8 @@ if _HERE not in sys.path:
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+from typing import Any
 
 from tools.qr_login import get_qr_code, check_login_status as qr_check_status
 from session_manager import get_status
@@ -133,3 +135,34 @@ async def login_status(user_id: str = Query(..., description="Supabase user ID")
 
     result = await qr_check_status(user_id.strip())
     return result
+
+
+# ---------------------------------------------------------------------------
+# POST /tools/call
+# ---------------------------------------------------------------------------
+
+class ToolCallRequest(BaseModel):
+    tool: str
+    params: dict[str, Any] = {}
+
+@app.post("/tools/call")
+async def tools_call(body: ToolCallRequest) -> dict:
+    """Generic tool dispatcher for legacy HTTP clients."""
+    tool = body.tool
+    params = body.params
+    user_id = params.get("user_id", "")
+
+    if tool == "get_qr_code":
+        return await get_qr_code(user_id)
+    elif tool == "check_login_status":
+        return await qr_check_status(user_id)
+    elif tool == "search_feeds":
+        from tools.search import search_xhs
+        return await search_xhs(
+            user_id=user_id,
+            keyword=params.get("keyword", ""),
+            limit=params.get("limit", 20),
+            sort_by=params.get("sort_by", "最多点赞"),
+        )
+    else:
+        raise HTTPException(status_code=404, detail=f"Unknown tool: {tool}")

@@ -35,7 +35,7 @@ import { createClient, getAuthenticatedUser } from '@/lib/supabase/server'
 import { resolveModel } from '@/lib/claude'
 import type { XHSNote, AgentType, RadarSearchResult } from '@/types'
 import { fetchXHSNotes } from '@/lib/xhs-client'
-import { createXHSMCPClient, searchXHS } from '@/lib/xhs-mcp-client'
+import { createXHSMCPClient, searchXHS, checkLoginStatus } from '@/lib/xhs-mcp-client'
 
 // ---------------------------------------------------------------------------
 // SSE helpers
@@ -190,6 +190,24 @@ export async function POST(req: NextRequest) {
       { error: 'API_KEY_NOT_CONFIGURED', message: '请先在「设置」页面配置你的 AI API Key' },
       { status: 422 }
     )
+  }
+
+  // Check XHS login status before attempting MCP search
+  const loginStatus = await checkLoginStatus(user.id).catch(() => ({ status: 'not_started' as const }))
+  if (loginStatus.status !== 'logged_in') {
+    const loginRequiredStream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(sseFrame('xhs_login_required', { message: '请先登录小红书' }))
+        controller.close()
+      },
+    })
+    return new Response(loginRequiredStream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+      },
+    })
   }
 
   const model = resolveModel(userAISettings)

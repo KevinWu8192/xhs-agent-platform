@@ -177,8 +177,13 @@ export default function RadarPage() {
 
   const handleSearch = useCallback(async () => {
     if (!query.trim()) return
+    if (xhsStatus !== 'logged_in') {
+      setPendingQuery(query)
+      openQRModal()
+      return
+    }
     runSearch(query)
-  }, [query, runSearch])
+  }, [query, xhsStatus, openQRModal, runSearch])
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') handleSearch()
@@ -248,6 +253,28 @@ export default function RadarPage() {
           >
             前往设置
           </Link>
+        </div>
+      )}
+
+      {/* ── XHS 未登录提示横幅 ─────────────────────────────── */}
+      {!xhsStatusLoading && xhsStatus !== 'logged_in' && hasApiKey !== false && (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-rose-50 border border-rose-200">
+          <span className="text-lg shrink-0">📱</span>
+          <p className="text-sm text-rose-800 flex-1">
+            信息雷达需要登录小红书才能获取真实数据
+          </p>
+          <button
+            onClick={openQRModal}
+            className={[
+              'shrink-0 h-8 px-4 rounded-lg inline-flex items-center',
+              'bg-gradient-to-r from-rose-500 to-pink-500',
+              'text-white text-xs font-medium',
+              'shadow-sm hover:shadow-glow-sm',
+              'transition-all duration-150 active:scale-[0.98]',
+            ].join(' ')}
+          >
+            去扫码
+          </button>
         </div>
       )}
 
