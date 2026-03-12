@@ -11,11 +11,11 @@ Run:
 Or via PM2 (see ecosystem.config.js):
   pm2 start ecosystem.config.js --only xhs-mcp-server
 
-Tools exposed (12 total):
+Tools exposed (16 total):
   Auth:     check_login_status, delete_cookies
-  Explore:  search_feeds, get_feed_detail, list_feeds, user_profile
+  Explore:  search_feeds, get_feed_detail, list_feeds, user_profile, get_comments
   Interact: post_comment_to_feed, reply_comment_in_feed, like_feed, favorite_feed
-  Publish:  publish_content, publish_with_video
+  Publish:  publish_content, publish_with_video, publish_long_article
 
 QR login flow is NOT an MCP tool — it requires browser UI and is handled by
 http_app.py on port 8001.
@@ -132,6 +132,8 @@ async def search_feeds(
     sort_by: str = "综合",
     note_type: str = "不限",
     publish_time: str = "不限",
+    search_scope: str = "不限",
+    location: str = "不限",
 ) -> str:
     """
     Search XHS notes by keyword.
@@ -145,6 +147,8 @@ async def search_feeds(
         note_type:    Content type filter — 不限 | 视频 | 图文
                       English aliases: all, video, image
         publish_time: Time range filter — 不限 | 一天内 | 一周内 | 半年内
+        search_scope: Scope filter — 不限 | 已看过 | 未看过 | 已关注
+        location:     Location filter — 不限 | 同城 | 附近
 
     Returns JSON:
         {"notes": [...XHSNote...], "total": N, "keyword": "..."}
@@ -163,6 +167,8 @@ async def search_feeds(
         sort_by=sort_by,
         note_type=note_type,
         publish_time=publish_time,
+        search_scope=search_scope,
+        location=location,
     )
     return json.dumps(result, ensure_ascii=False)
 
@@ -172,15 +178,26 @@ async def get_feed_detail(
     user_id: str,
     feed_id: str,
     xsec_token: str = "",
+    load_all_comments: bool = False,
+    click_more_replies: bool = False,
+    max_replies_threshold: int = 10,
+    max_comment_items: int = 0,
+    scroll_speed: str = "normal",
 ) -> str:
     """
     Get full note detail including comments for a specific XHS note.
 
     Args:
-        user_id:     Supabase user ID (must be logged in)
-        feed_id:     XHS note/feed ID (obtained from search_feeds results)
-        xsec_token:  xsec_token from the search result (improves API access;
-                     leave empty to attempt without it)
+        user_id:               Supabase user ID (must be logged in)
+        feed_id:               XHS note/feed ID (obtained from search_feeds results)
+        xsec_token:            xsec_token from the search result (improves API access;
+                               leave empty to attempt without it)
+        load_all_comments:     Whether to scroll and load all top-level comments
+        click_more_replies:    Whether to expand reply threads under each comment
+        max_replies_threshold: Only expand reply threads with fewer replies than
+                               this threshold (default 10)
+        max_comment_items:     Max number of top-level comments to load (0 = no limit)
+        scroll_speed:          Scroll speed for loading comments — normal | fast | slow
 
     Returns JSON:
         Full FeedDetail dict with note content, images, and comments.
@@ -196,6 +213,11 @@ async def get_feed_detail(
         user_id=user_id,
         feed_id=feed_id,
         xsec_token=xsec_token,
+        load_all_comments=load_all_comments,
+        click_more_replies=click_more_replies,
+        max_replies_threshold=max_replies_threshold,
+        max_comment_items=max_comment_items,
+        scroll_speed=scroll_speed,
     )
     return json.dumps(result, ensure_ascii=False)
 
@@ -460,6 +482,134 @@ async def publish_with_video(
         video_path=video_path,
     )
     return json.dumps(result, ensure_ascii=False)
+
+
+@mcp.tool()
+async def publish_long_article(
+    user_id: str,
+    title: str,
+    content: str,
+    description: str = "",
+    template_name: str = "",
+    image_paths: list[str] | None = None,
+) -> str:
+    """
+    Publish a long-form article on XHS (小红书).
+
+    Three-step flow: fill content → select template → publish.
+
+    Args:
+        user_id:       Supabase user ID (must be logged in)
+        title:         Article title
+        content:       Article body (markdown or plain text)
+        description:   Short description shown on publish page (defaults to first 100 chars of content)
+        template_name: Layout template name (leave empty to use first available)
+        image_paths:   Optional list of local image file paths
+
+    Returns JSON:
+        {"success": true, "status": "published"} or {"error": "..."}
+    """
+    import tempfile
+    import os
+
+    if not is_logged_in(user_id):
+        return json.dumps({"error": "not_logged_in", "message": "Please complete XHS login first"}, ensure_ascii=False)
+
+    acct = account_name(user_id)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        title_file = os.path.join(tmpdir, "title.txt")
+        content_file = os.path.join(tmpdir, "content.txt")
+        desc_file = os.path.join(tmpdir, "desc.txt")
+
+        with open(title_file, "w", encoding="utf-8") as f:
+            f.write(title)
+        with open(content_file, "w", encoding="utf-8") as f:
+            f.write(content)
+        desc_text = description or content[:100]
+        with open(desc_file, "w", encoding="utf-8") as f:
+            f.write(desc_text)
+
+        # Step 1: Fill long article
+        long_args = ["--account", acct, "long-article", "--title-file", title_file, "--content-file", content_file]
+        if image_paths:
+            long_args += ["--images"] + image_paths
+        result = _run_cli(*long_args, timeout=90)
+        if "error" in result:
+            return json.dumps({"error": result["error"]}, ensure_ascii=False)
+
+        templates = result.get("templates", [])
+
+        # Step 2: Select template (use first if not specified)
+        chosen_template = template_name or (templates[0] if templates else "")
+        if chosen_template:
+            sel_result = _run_cli("--account", acct, "select-template", "--name", chosen_template, timeout=30)
+            if sel_result.get("success") is False:
+                logger.warning("Template selection failed: %s", sel_result)
+
+        # Step 3: Next step + fill description
+        next_result = _run_cli("--account", acct, "next-step", "--content-file", desc_file, timeout=30)
+        if "error" in next_result:
+            return json.dumps({"error": next_result.get("error", "next-step failed")}, ensure_ascii=False)
+
+        # Step 4: Click publish
+        pub_result = _run_cli("--account", acct, "click-publish", timeout=30)
+
+        return json.dumps({
+            "success": True,
+            "status": "published",
+            "templates_available": templates,
+            "template_used": chosen_template,
+        }, ensure_ascii=False)
+
+
+@mcp.tool()
+async def get_comments(
+    user_id: str,
+    feed_id: str,
+    xsec_token: str = "",
+    max_comments: int = 20,
+    include_replies: bool = False,
+) -> str:
+    """
+    Get comments for an XHS note (lightweight — skips loading the full note content).
+
+    Use this instead of get_feed_detail when you only need the comments.
+
+    Args:
+        user_id:         Supabase user ID (must be logged in)
+        feed_id:         XHS note/feed ID
+        xsec_token:      xsec_token from search results
+        max_comments:    Maximum number of top-level comments to load (default 20)
+        include_replies: Whether to expand and load reply threads (slower, default False)
+
+    Returns JSON:
+        {"comments": [...], "has_more": bool, "feed_id": "..."}
+    """
+    if not is_logged_in(user_id):
+        return json.dumps({"error": "not_logged_in"}, ensure_ascii=False)
+
+    result = await get_feed_detail_impl(
+        user_id=user_id,
+        feed_id=feed_id,
+        xsec_token=xsec_token,
+        load_all_comments=True,
+        click_more_replies=include_replies,
+        max_replies_threshold=5 if include_replies else 0,
+        max_comment_items=max_comments,
+        scroll_speed="fast",
+    )
+
+    if "error" in result:
+        return json.dumps(result, ensure_ascii=False)
+
+    comments_data = result.get("comments", {})
+    return json.dumps({
+        "feed_id": feed_id,
+        "comments": comments_data.get("list", []),
+        "has_more": comments_data.get("has_more", False),
+        "total_loaded": len(comments_data.get("list", [])),
+    }, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------------------

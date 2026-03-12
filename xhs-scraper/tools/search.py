@@ -166,6 +166,8 @@ async def search_xhs(
     sort_by: str = "综合",
     note_type: str = "不限",
     publish_time: str = "不限",
+    search_scope: str = "不限",
+    location: str = "不限",
 ) -> dict[str, Any]:
     """
     MCP tool: search_xhs
@@ -181,6 +183,8 @@ async def search_xhs(
         note_type:    Content type filter — 不限 | 视频 | 图文
                       Also accepts: all, video, image, normal
         publish_time: Time filter — 不限 | 一天内 | 一周内 | 半年内
+        search_scope: Scope filter — 不限 | 已看过 | 未看过 | 已关注
+        location:     Location filter — 不限 | 同城 | 附近
 
     Returns:
         {"notes": [...XHSNote...], "total": N, "keyword": "..."}
@@ -203,6 +207,10 @@ async def search_xhs(
     ]
     if publish_time and publish_time not in ("不限", "all"):
         cli_args += ["--publish-time", publish_time]
+    if search_scope and search_scope not in ("不限", "all"):
+        cli_args += ["--search-scope", search_scope]
+    if location and location not in ("不限", "all"):
+        cli_args += ["--location", location]
 
     data = _run_cli(*cli_args, timeout=60)
 

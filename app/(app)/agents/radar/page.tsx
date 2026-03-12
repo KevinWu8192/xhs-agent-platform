@@ -177,9 +177,14 @@ export default function RadarPage() {
 
   const handleSearch = useCallback(async () => {
     if (!query.trim()) return
-    if (xhsStatus !== 'logged_in') {
+    if (xhsStatus === 'not_logged_in') {
       setPendingQuery(query)
       openQRModal()
+      return
+    }
+    if (xhsStatus !== 'logged_in') {
+      // unknown — still polling pending state; store query and let polling trigger search
+      setPendingQuery(query)
       return
     }
     runSearch(query)

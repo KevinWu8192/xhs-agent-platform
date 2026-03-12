@@ -15,7 +15,7 @@
 //    Then render {QRModal} anywhere in the JSX tree.
 // ─────────────────────────────────────────────────────────────
 
-import { useState, useEffect, useCallback, createElement } from 'react'
+import { useState, useEffect, useCallback, useRef, createElement } from 'react'
 import { XHSQRModal } from '@/components/xhs-qr-modal'
 
 export type XHSSessionStatus = 'unknown' | 'logged_in' | 'not_logged_in'
@@ -38,6 +38,15 @@ export function useXHSSession(userId: string): UseXHSSessionReturn {
   const [isLoading, setIsLoading] = useState(true)
   const [isModalOpen, setIsModalOpen] = useState(false)
 
+  const pendingPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  function stopPendingPoll() {
+    if (pendingPollRef.current) {
+      clearInterval(pendingPollRef.current)
+      pendingPollRef.current = null
+    }
+  }
+
   // ── Fetch current status ───────────────────────────────────
 
   const refreshStatus = useCallback(async () => {
@@ -50,13 +59,44 @@ export function useXHSSession(userId: string): UseXHSSessionReturn {
     try {
       const res = await fetch(`/api/xhs/status?user_id=${encodeURIComponent(userId)}`)
       if (!res.ok) {
+        stopPendingPoll()
         setStatus('not_logged_in')
         return
       }
       const data = await res.json()
-      setStatus(data.status === 'logged_in' ? 'logged_in' : 'not_logged_in')
+      const backendStatus = data.status as string
+
+      if (backendStatus === 'logged_in') {
+        stopPendingPoll()
+        setStatus('logged_in')
+      } else if (backendStatus === 'pending') {
+        // wait-login task is still running — keep unknown (don't show QR), start polling
+        setStatus('unknown')
+        if (!pendingPollRef.current) {
+          pendingPollRef.current = setInterval(async () => {
+            try {
+              const r = await fetch(`/api/xhs/status?user_id=${encodeURIComponent(userId)}`)
+              if (!r.ok) return
+              const d = await r.json()
+              if (d.status === 'logged_in') {
+                stopPendingPoll()
+                setStatus('logged_in')
+              } else if (d.status !== 'pending') {
+                // became not_started / expired — genuinely logged out
+                stopPendingPoll()
+                setStatus('not_logged_in')
+              }
+            } catch { /* ignore */ }
+          }, 3000)
+        }
+      } else {
+        // not_started / expired — truly not logged in
+        stopPendingPoll()
+        setStatus('not_logged_in')
+      }
     } catch {
       // Network error; default to not_logged_in so we show the login prompt
+      stopPendingPoll()
       setStatus('not_logged_in')
     } finally {
       setIsLoading(false)
@@ -66,6 +106,9 @@ export function useXHSSession(userId: string): UseXHSSessionReturn {
   // Run once on mount (or when userId changes)
   useEffect(() => {
     refreshStatus()
+    return () => {
+      stopPendingPoll()
+    }
   }, [refreshStatus])
 
   // ── Modal handlers ─────────────────────────────────────────

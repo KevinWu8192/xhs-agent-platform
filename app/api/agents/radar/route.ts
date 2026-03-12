@@ -327,26 +327,42 @@ export async function POST(req: NextRequest) {
 
           // System prompt tells Claude its identity and that it should always
           // pass the authenticated user's ID when calling MCP tools.
-          const systemPrompt = `你是一位专业的小红书趋势分析助手，拥有小红书平台工具访问权限。
+          const systemPrompt = `你是一位专业的小红书趋势分析助手，拥有完整的小红书数据获取工具。
 
 当前认证用户ID为: ${user.id}
 调用任何工具时，必须将此 user_id 作为参数传入。
 
-你的任务是：
-1. 使用 search_feeds 工具搜索关键词「${query}」的内容（limit: ${limit}，sort_by: 最多点赞）
-2. 分析搜索结果，提供深度趋势洞察
-3. 如有需要，可进一步调用 get_feed_detail 获取具体笔记详情
+## 工作流程（必须严格按顺序执行）
 
-请用中文回复分析结果。`
+### 第一步：搜索
+- 调用 search_feeds，使用关键词「${query}」，参数：limit=${limit}，sort_by=最多点赞
+- 如果关键词较宽泛，可以细化后再搜一次（最多再搜1次）
 
-          const userPrompt = `请搜索小红书上关于「${query}」的热门内容，并进行以下维度的深度分析：
+### 第二步：获取笔记详情（关键步骤，不可跳过）
+- 从搜索结果中选出点赞最多的前3篇笔记
+- 对每篇分别调用 get_feed_detail（传入 feed_id 和 xsec_token，load_all_comments=true，max_comment_items=15）
+- 获取每篇笔记的完整正文、标签、发布时间、互动数据、热门评论
 
-1. **内容趋势** — 当前热门内容方向和话题
-2. **用户痛点** — 目标受众最关心的问题
-3. **爆款规律** — 高互动笔记的共同特征
-4. **差异化机会** — 未被充分覆盖的选题角度
-5. **创作建议** — 3-5条具体的内容创作建议
-6. **最佳发布时机** — 推荐的发布时间和频率${filters ? `\n\n筛选条件: ${JSON.stringify(filters)}` : ''}`
+### 第三步：深度分析
+- **必须基于笔记的真实内容（正文+评论）进行分析，不能凭空生成**
+- 分析维度：内容趋势、用户痛点、爆款规律、差异化机会、创作建议、发布时机
+
+## 重要约束
+- 分析报告必须引用具体笔记内容（例如"某篇点赞最高的笔记写道…"）
+- 不得在获取详情之前开始撰写分析报告
+- 请用中文回复`
+
+          const userPrompt = `请分析小红书上「${query}」相关内容，完成以下任务：
+
+1. 搜索热门笔记（sort_by: 最多点赞）
+2. 获取前3篇笔记的完整内容和热门评论
+3. 基于真实内容输出深度分析报告，包含：
+   - **内容趋势** — 当前热门方向和话题（引用具体笔记）
+   - **用户痛点** — 目标受众最关心的问题（来自评论分析）
+   - **爆款规律** — 高互动笔记的共同特征（标题、格式、长度）
+   - **差异化机会** — 未被充分覆盖的角度
+   - **创作建议** — 3-5条具体可操作的建议
+   - **最佳发布时机** — 基于发布时间数据推断${filters ? `\n\n筛选条件: ${JSON.stringify(filters)}` : ''}`
 
           // Stream Claude's agentic execution
           const result = streamText({
@@ -354,7 +370,7 @@ export async function POST(req: NextRequest) {
             system: systemPrompt,
             messages: [{ role: 'user', content: userPrompt }],
             tools,
-            maxSteps: 5,
+            maxSteps: 10,
           })
 
           let fullAnalysis = ''
@@ -375,16 +391,21 @@ export async function POST(req: NextRequest) {
                     // The MCP tool result can be an array of notes or a
                     // {notes: [...]} object — handle both shapes
                     const toolResult = part.result as unknown
+                    // MCP tools return JSON strings — parse if needed
+                    let parsedResult: unknown = toolResult
+                    if (typeof toolResult === 'string') {
+                      try { parsedResult = JSON.parse(toolResult) } catch { parsedResult = toolResult }
+                    }
+
                     let extractedNotes: XHSNote[] = []
 
-                    if (Array.isArray(toolResult)) {
-                      extractedNotes = toolResult as XHSNote[]
-                    } else if (
-                      toolResult &&
-                      typeof toolResult === 'object' &&
-                      Array.isArray((toolResult as { notes?: XHSNote[] }).notes)
-                    ) {
-                      extractedNotes = (toolResult as { notes: XHSNote[] }).notes
+                    if (Array.isArray(parsedResult)) {
+                      extractedNotes = parsedResult as XHSNote[]
+                    } else if (parsedResult && typeof parsedResult === 'object') {
+                      const r = parsedResult as Record<string, unknown>
+                      if (Array.isArray(r.notes)) {
+                        extractedNotes = r.notes as XHSNote[]
+                      }
                     }
 
                     if (extractedNotes.length > 0) {

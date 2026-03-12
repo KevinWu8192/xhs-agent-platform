@@ -69,14 +69,25 @@ async def get_feed_detail_impl(
     user_id: str,
     feed_id: str,
     xsec_token: str = "",
+    load_all_comments: bool = False,
+    click_more_replies: bool = False,
+    max_replies_threshold: int = 10,
+    max_comment_items: int = 0,
+    scroll_speed: str = "normal",
 ) -> dict[str, Any]:
     """
     Get full note detail including comments for the given feed_id.
 
     Args:
-        user_id:     Supabase user ID (must be logged in)
-        feed_id:     XHS note/feed ID
-        xsec_token:  xsec_token from search results (improves API access)
+        user_id:               Supabase user ID (must be logged in)
+        feed_id:               XHS note/feed ID
+        xsec_token:            xsec_token from search results (improves API access)
+        load_all_comments:     Whether to scroll and load all top-level comments
+        click_more_replies:    Whether to expand reply threads under each comment
+        max_replies_threshold: Only expand reply threads with fewer replies than
+                               this threshold (default 10)
+        max_comment_items:     Max number of top-level comments to load (0 = no limit)
+        scroll_speed:          Scroll speed for loading comments — normal | fast | slow
 
     Returns:
         Full FeedDetail dict from the CLI, or error dict.
@@ -91,8 +102,18 @@ async def get_feed_detail_impl(
     cli_args = ["--account", acct, "get-feed-detail", "--feed-id", feed_id]
     if xsec_token:
         cli_args += ["--xsec-token", xsec_token]
+    if load_all_comments:
+        cli_args.append("--load-all-comments")
+    if click_more_replies:
+        cli_args.append("--click-more-replies")
+    if max_replies_threshold != 10:
+        cli_args += ["--max-replies-threshold", str(max_replies_threshold)]
+    if max_comment_items > 0:
+        cli_args += ["--max-comment-items", str(max_comment_items)]
+    if scroll_speed and scroll_speed != "normal":
+        cli_args += ["--scroll-speed", scroll_speed]
 
-    data = _run_cli(*cli_args, timeout=45)
+    data = _run_cli(*cli_args, timeout=90)
 
     if "error" in data:
         return {"error": data["error"], "feed_id": feed_id}
