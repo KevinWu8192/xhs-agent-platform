@@ -27,6 +27,16 @@ export default function RadarPage() {
   const [hasSearched, setHasSearched] = useState(false)
   const [activePlatform, setActivePlatform] = useState('全部平台')
 
+  // ── API key status ──────────────────────────────────────────
+  const [hasApiKey, setHasApiKey] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    fetch('/api/settings')
+      .then((r) => r.json())
+      .then((data) => setHasApiKey(!!(data.hasCustomKey || data.systemHasDefault)))
+      .catch(() => setHasApiKey(false))
+  }, [])
+
   // ── Supabase user ID ───────────────────────────────────────
   const [userId, setUserId] = useState<string>('')
 
@@ -116,8 +126,14 @@ export default function RadarPage() {
           }
 
           try {
-            const parsed = JSON.parse(raw) as { event: RadarSSEEvent; data: unknown }
-            if (parsed.event === 'notes') {
+            const parsed = JSON.parse(raw) as { event: RadarSSEEvent | 'xhs_login_required'; data: unknown }
+            if (parsed.event === 'xhs_login_required') {
+              // Agent signals XHS login is needed — open QR modal on-demand
+              setPendingQuery(searchQuery)
+              openQRModal()
+              setIsLoading(false)
+              return
+            } else if (parsed.event === 'notes') {
               setNotes(parsed.data as XHSNote[])
             } else if (parsed.event === 'delta') {
               const delta = parsed.data as { type: string; text: string }
@@ -142,20 +158,12 @@ export default function RadarPage() {
       setError(err instanceof Error ? err.message : '网络请求失败')
       setIsLoading(false)
     }
-  }, [])
+  }, [openQRModal])
 
   const handleSearch = useCallback(async () => {
     if (!query.trim()) return
-
-    // If XHS not logged in, save query as pending and open modal
-    if (xhsStatus === 'not_logged_in') {
-      setPendingQuery(query.trim())
-      openQRModal()
-      return
-    }
-
     runSearch(query)
-  }, [query, xhsStatus, openQRModal, runSearch])
+  }, [query, runSearch])
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') handleSearch()
@@ -206,25 +214,25 @@ export default function RadarPage() {
         </div>
       </div>
 
-      {/* ── XHS 登录提示横幅 ────────────────────────────────────── */}
-      {!xhsStatusLoading && xhsStatus === 'not_logged_in' && (
+      {/* ── API Key 未配置提示横幅（优先展示）──────────────────── */}
+      {hasApiKey === false && (
         <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200">
-          <span className="text-lg shrink-0">⚠️</span>
+          <span className="text-lg shrink-0">⚙️</span>
           <p className="text-sm text-amber-800 flex-1">
-            需要登录小红书账号才能获取真实数据
+            请先配置 AI API Key 才能使用信息雷达
           </p>
-          <button
-            onClick={openQRModal}
+          <Link
+            href="/settings"
             className={[
-              'shrink-0 h-8 px-4 rounded-lg',
+              'shrink-0 h-8 px-4 rounded-lg inline-flex items-center',
               'bg-gradient-to-r from-rose-500 to-pink-500',
               'text-white text-xs font-medium',
               'shadow-sm hover:shadow-glow-sm',
               'transition-all duration-150 active:scale-[0.98]',
             ].join(' ')}
           >
-            登录小红书
-          </button>
+            前往设置
+          </Link>
         </div>
       )}
 
@@ -240,12 +248,11 @@ export default function RadarPage() {
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={
-            xhsStatus === 'not_logged_in'
-              ? '登录小红书后即可搜索...'
-              : '搜索热点话题、关键词... 例如：秋冬穿搭、美食打卡'
+            hasApiKey === false
+              ? '请先配置 API Key...'
+              : '搜索热点话题、关键词...'
           }
-          disabled={xhsStatus === 'not_logged_in'}
-          title={xhsStatus === 'not_logged_in' ? '请先登录小红书账号' : undefined}
+          disabled={hasApiKey === false}
           className={[
             'w-full',
             'h-14 pl-14 pr-32',
@@ -256,14 +263,12 @@ export default function RadarPage() {
             'transition-all duration-200',
             'focus:outline-none focus:border-rose-400 focus:shadow-card-md',
             'focus:ring-4 focus:ring-rose-100',
-            xhsStatus === 'not_logged_in'
-              ? 'opacity-60 cursor-not-allowed bg-neutral-50'
-              : '',
+            hasApiKey === false ? 'opacity-60 cursor-not-allowed bg-neutral-50' : '',
           ].join(' ')}
         />
 
         <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
-          {query && xhsStatus !== 'not_logged_in' && (
+          {query && hasApiKey !== false && (
             <button
               onClick={() => setQuery('')}
               className="text-neutral-300 hover:text-neutral-500 p-1 transition-colors"
@@ -274,8 +279,7 @@ export default function RadarPage() {
 
           <button
             onClick={handleSearch}
-            disabled={searchDisabled}
-            title={xhsStatus === 'not_logged_in' ? '请先登录小红书账号' : undefined}
+            disabled={searchDisabled || hasApiKey === false}
             className={[
               'h-9 px-5 rounded-xl',
               'bg-gradient-to-r from-rose-500 to-pink-500',

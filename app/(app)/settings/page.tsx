@@ -123,11 +123,15 @@ export default function SettingsPage() {
       })
       if (!res.ok) throw new Error(`保存失败 (${res.status})`)
 
-      // 保存成功后刷新预览状态
-      if (isEditingKey && newApiKey) {
-        setHasCustomKey(true)
-        // keyPreview 由服务端返回，这里暂时隐藏原值
-        setKeyPreview(null)
+      // 保存成功后从服务端重新拉取最新状态（含真实 keyPreview）
+      const refreshRes = await fetch('/api/settings')
+      if (refreshRes.ok) {
+        const refreshData: SettingsResponse = await refreshRes.json()
+        setHasCustomKey(refreshData.hasCustomKey)
+        setKeyPreview(refreshData.keyPreview)
+      }
+
+      if (isEditingKey) {
         setIsEditingKey(false)
         setNewApiKey('')
       }
@@ -372,6 +376,36 @@ export default function SettingsPage() {
           )}
         </div>
       </div>
+
+      {/* ── 当前 AI 配置信息卡片 ───────────────────────────────── */}
+      {(hasCustomKey || baseUrl.trim()) && (
+        <div className="mt-5 bg-neutral-50 border border-neutral-200 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-sm">⚙️</span>
+            <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wide">当前配置</span>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-neutral-400 w-16 shrink-0">API URL</span>
+              <span className="text-neutral-700 font-mono text-xs truncate">
+                {baseUrl.trim() || '默认 (Anthropic)'}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-neutral-400 w-16 shrink-0">模型</span>
+              <span className="text-neutral-700 font-mono text-xs">
+                {selectedModel === 'custom' ? (customModel.trim() || '—') : selectedModel}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-neutral-400 w-16 shrink-0">API Key</span>
+              <span className="text-neutral-700 font-mono text-xs">
+                {hasCustomKey && keyPreview ? keyPreview : hasCustomKey ? '已配置' : '未配置'}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
