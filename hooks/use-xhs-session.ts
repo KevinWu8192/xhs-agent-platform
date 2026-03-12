@@ -42,8 +42,7 @@ export function useXHSSession(userId: string): UseXHSSessionReturn {
 
   const refreshStatus = useCallback(async () => {
     if (!userId) {
-      setStatus('not_logged_in')
-      setIsLoading(false)
+      // userId not yet loaded — stay in loading state, don't flash 'not_logged_in'
       return
     }
 
