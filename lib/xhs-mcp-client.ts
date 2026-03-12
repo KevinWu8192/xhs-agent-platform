@@ -115,6 +115,7 @@ export async function callMCPTool<T>(
 
 /**
  * Initiates XHS login for a user.
+ * Calls GET /qr-login?user_id=<uid> on the HTTP login server (port 8001).
  * Returns a QR code image (base64) to be displayed to the user, or confirms
  * the user is already logged in.
  */
@@ -123,17 +124,41 @@ export async function getQRCode(userId: string): Promise<{
   qr_image_base64?: string
   session_id?: string
 }> {
-  return callMCPTool('get_qr_code', { user_id: userId })
+  const res = await fetch(
+    `${MCP_HTTP_URL}/qr-login?user_id=${encodeURIComponent(userId)}`
+  )
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`QR login server returned HTTP ${res.status}: ${text}`)
+  }
+
+  const json = await res.json()
+  if (json.status === 'error') {
+    throw new Error(json.message ?? 'QR login failed')
+  }
+
+  return json
 }
 
 /**
  * Polls the login status for a user session.
+ * Calls GET /login-status?user_id=<uid> on the HTTP login server (port 8001).
  * Call this repeatedly after getQRCode() until status is 'logged_in'.
  */
 export async function checkLoginStatus(userId: string): Promise<{
   status: 'not_started' | 'pending' | 'logged_in' | 'expired'
 }> {
-  return callMCPTool('check_login_status', { user_id: userId })
+  const res = await fetch(
+    `${MCP_HTTP_URL}/login-status?user_id=${encodeURIComponent(userId)}`
+  )
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`Login status server returned HTTP ${res.status}: ${text}`)
+  }
+
+  return res.json()
 }
 
 /**
