@@ -36,7 +36,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Any
 
-from tools.qr_login import get_qr_code, check_login_status as qr_check_status
+from tools.qr_login import get_qr_code, check_login_status as qr_check_status, _wait_tasks
 from session_manager import get_status, set_not_started
 
 logging.basicConfig(
@@ -88,18 +88,54 @@ async def health():
 
 @app.get("/qr-reset")
 async def qr_reset(user_id: str = Query(..., description="Supabase user ID")) -> dict:
-    """
-    Clear session state so the QR modal can start fresh.
-
-    Resets a pending or expired session back to not_started so that the next
-    call to /qr-login always triggers a new QR code fetch instead of reading
-    stale state from a previous session.
-    """
+    """Clear all session state so the QR modal starts completely fresh."""
     if not user_id or not user_id.strip():
         raise HTTPException(status_code=400, detail="user_id is required")
 
-    logger.info("QR reset requested for user_id=%s", user_id)
-    set_not_started(user_id.strip())
+    uid = user_id.strip()
+    logger.info("QR reset requested for user_id=%s", uid)
+
+    # 1. Cancel any running wait-login background task
+    task = _wait_tasks.pop(uid, None)
+    if task and not task.done():
+        task.cancel()
+        logger.info("Cancelled wait-login task for %s", uid)
+
+    # 2. Kill Chrome process + clear CLI tab files
+    try:
+        import sys, tempfile
+        from pathlib import Path as _Path
+        skills_scripts = _Path.home() / ".claude" / "skills" / "xiaohongshu-skills-main" / "scripts"
+        if str(skills_scripts) not in sys.path:
+            sys.path.insert(0, str(skills_scripts))
+        from chrome_launcher import kill_chrome
+
+        # Get port from account_manager (falls back to 9222)
+        port = 9222
+        try:
+            import account_manager as _am
+            from session_manager import account_name
+            acct_data = _am.get_or_create_account(account_name(uid))
+            port = acct_data.get("port", 9222)
+        except Exception:
+            pass
+
+        kill_chrome(port)
+
+        # Clear CLI tab files
+        tab_dir = _Path(tempfile.gettempdir()) / "xhs"
+        for fname in [f"login_tab_{port}.txt", f"session_tab_{port}.txt"]:
+            try:
+                (tab_dir / fname).unlink(missing_ok=True)
+            except Exception:
+                pass
+        logger.info("Killed Chrome (port=%d) and cleared tab files for %s", port, uid)
+    except Exception as exc:
+        logger.warning("Could not kill Chrome for %s: %s", uid, exc)
+
+    # 3. Delete session JSON file
+    set_not_started(uid)
+
     return {"status": "reset"}
 
 

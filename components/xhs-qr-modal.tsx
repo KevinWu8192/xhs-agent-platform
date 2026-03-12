@@ -147,10 +147,7 @@ export function XHSQRModal({ userId, isOpen, onClose, onLoginSuccess }: XHSQRMod
         const data = await res.json()
         const loginStatus: string = data.status
 
-        if (loginStatus === 'pending') {
-          // User has scanned but not yet confirmed
-          setStatus('scanning')
-        } else if (loginStatus === 'logged_in') {
+        if (loginStatus === 'logged_in') {
           clearAll()
           setStatus('logged_in')
           autoCloseRef.current = setTimeout(() => {

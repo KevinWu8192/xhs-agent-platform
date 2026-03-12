@@ -273,26 +273,11 @@ async def get_qr_code(user_id: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 async def check_login_status(user_id: str) -> dict[str, Any]:
+    """Return current session status (file-based).
+
+    Deliberately does NOT call check-login CLI — that command opens an extra
+    Chrome tab and competes with the background wait-login CDP connection,
+    causing wait-login to miss the login event.  wait-login is solely
+    responsible for transitioning pending → logged_in.
     """
-    MCP tool: check_login_status
-
-    Returns the current login status for *user_id*.
-
-    If status is "pending" we also probe Chrome directly via check-login so
-    that login events are caught even if the background wait-login task missed
-    them.
-
-    Returns:
-        {"status": "logged_in" | "pending" | "expired" | "not_started"}
-    """
-    status = get_status(user_id)
-
-    if status == "pending":
-        # Probe Chrome to see if the user has already scanned
-        acct = account_name(user_id)
-        data = _run_cli("--account", acct, "check-login", timeout=30)
-        if data.get("logged_in") is True:
-            set_logged_in(user_id)
-            return {"status": "logged_in"}
-
-    return {"status": status}
+    return {"status": get_status(user_id)}
