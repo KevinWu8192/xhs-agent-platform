@@ -192,9 +192,12 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  // Check XHS login status before attempting MCP search
-  const loginStatus = await checkLoginStatus(user.id).catch(() => ({ status: 'not_started' as const }))
-  if (loginStatus.status !== 'logged_in') {
+  // Check XHS login status before attempting MCP search.
+  // If the status check itself fails (port 8001 temporarily unavailable), null is returned
+  // and we proceed — the MCP tools will surface a proper error if the session is truly invalid.
+  // Only block if we get a definitive non-logged-in status back.
+  const loginStatus = await checkLoginStatus(user.id).catch(() => null)
+  if (loginStatus && loginStatus.status !== 'logged_in') {
     const loginRequiredStream = new ReadableStream({
       start(controller) {
         controller.enqueue(sseFrame('xhs_login_required', { message: '请先登录小红书' }))

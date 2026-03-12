@@ -66,6 +66,7 @@ export default function RadarPage() {
   const {
     status: xhsStatus,
     isLoading: xhsStatusLoading,
+    refreshStatus: refreshXHSStatus,
     openQRModal,
     QRModal,
   } = useXHSSession(userId)
@@ -143,9 +144,18 @@ export default function RadarPage() {
           try {
             const parsed = JSON.parse(raw) as { event: RadarSSEEvent | 'xhs_login_required'; data: unknown }
             if (parsed.event === 'xhs_login_required') {
-              // Agent signals XHS login is needed — open QR modal on-demand
-              setPendingQuery(searchQuery)
-              openQRModal()
+              // Agent signals XHS login is needed — refresh status first to
+              // avoid false positives (e.g. transient port 8001 failure).
+              // Only open the QR modal if the session is genuinely not logged in.
+              await refreshXHSStatus()
+              // xhsStatus may still reflect the pre-refresh value in this closure,
+              // so re-fetch status directly to get the latest value.
+              const statusRes = await fetch(`/api/xhs/status?user_id=${encodeURIComponent(userId)}`).catch(() => null)
+              const statusData = statusRes?.ok ? await statusRes.json().catch(() => null) : null
+              if (!statusData || statusData.status !== 'logged_in') {
+                setPendingQuery(searchQuery)
+                openQRModal()
+              }
               setIsLoading(false)
               return
             } else if (parsed.event === 'notes') {
