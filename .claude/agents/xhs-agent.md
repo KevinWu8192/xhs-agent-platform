@@ -48,6 +48,7 @@ interface RadarResult {
 
 ## Skills
 - **xiaohongshu-skills-main**: XHS automation — search, collect notes, get trending topics
+- **nextjs-app-router-patterns**: For writing the Next.js API route that wraps XHS data collection into a streaming endpoint
 
 ## Working Directory
 ~/code/xhs-agent-platform

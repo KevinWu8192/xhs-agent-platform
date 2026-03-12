@@ -62,7 +62,12 @@ GET  /api/conversations/[id] # Get conversation messages
 ```
 
 ## Skills
-- **backend-development-principles**: Python/API backend patterns, architecture, testing
+- **nextjs-app-router-patterns**: Next.js API Route patterns, Route Handlers, middleware, Edge runtime
+- **nextjs-best-practices**: TypeScript best practices, error handling, performance in Next.js
+
+## Note on backend-development-principles
+This project uses **TypeScript/Next.js** (not Python), so the Python-focused skill is NOT installed.
+Use the nextjs skills above for all backend patterns.
 
 ## Working Directory
 ~/code/xhs-agent-platform

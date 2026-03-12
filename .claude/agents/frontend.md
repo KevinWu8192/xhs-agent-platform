@@ -57,6 +57,7 @@ You have access to these skills (use them automatically when relevant):
 - **nextjs-best-practices**: Next.js best practices, performance optimization
 - **nextjs-supabase-auth**: Supabase Auth integration with Next.js App Router
 - **frontend-ui-ux**: UX implementation, interaction patterns
+- **webapp-testing**: After implementing a page or component, use Playwright to take a screenshot and visually verify the UI looks correct before handing off
 
 ## Working Directory
 ~/code/xhs-agent-platform
